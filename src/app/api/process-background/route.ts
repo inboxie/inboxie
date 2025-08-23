@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
     // Authentication (optional for self-triggered calls)
     const session = await getServerSession(authOptions);
     const body = await request.json();
-    const { batchSize = 10, userId } = body;
+    const { batchSize = 50, userId } = body;
 
     // Get emails that need AI categorization
     // Create Supabase client locally
