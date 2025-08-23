@@ -298,6 +298,12 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get('userId');
 
+    const { createClient } = await import('@supabase/supabase-js');
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_ANON_KEY!
+);
+
     let query = supabase
       .from('email_cache')
       .select('id, subject, from_addr, created_at')
