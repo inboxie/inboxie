@@ -12,7 +12,7 @@ async function processBatch(
   batchSize: number,
   userId?: string,
   totalProcessed = 0,
-  maxBatches = 20 // Safety limit to prevent infinite recursion
+  maxBatches = 10 // Reduced from 20 since we're doing 50 emails per batch
 ): Promise<{
   totalProcessed: number;
   allComplete: boolean;
@@ -74,7 +74,7 @@ async function processBatch(
     }
   });
 
-  // BATCH AI CATEGORIZATION (same logic)
+  // BATCH AI CATEGORIZATION - KEEP THIS IN PARALLEL (fast, no rate limits)
   console.log('🤖 Running AI categorization in parallel...');
   const categorizePromises = emailsToProcess.map(async (email) => {
     try {
@@ -136,24 +136,28 @@ async function processBatch(
     await Promise.all(labelCreationPromises);
   }
 
-  // Apply Gmail labels and update database (same logic, but with rate limiting)
-  console.log('🏷️ Applying labels and updating database...');
-  const updatePromises = successfulCategorizations.map(async (result, index) => {
+  // SEQUENTIAL GMAIL LABELING - This is the rate-limited part
+  console.log('🏷️ Applying Gmail labels sequentially to avoid rate limits...');
+  const updateResults = [];
+
+  for (let i = 0; i < successfulCategorizations.length; i++) {
+    const result = successfulCategorizations[i];
     try {
       const { email, categoryResult } = result;
       
-      // Add small delay to avoid Gmail rate limits (stagger the requests)
-      if (index > 0) {
-        await new Promise(resolve => setTimeout(resolve, 100 * (index % 5))); // 0, 100, 200, 300, 400ms delays
-      }
-      
-      // Apply Gmail label
+      // Apply Gmail label sequentially (this is the rate-limited part)
       const labelId = labelMap.get(categoryResult.category.toLowerCase());
       if (labelId) {
         await applyLabelToEmail(accessToken, email.id, labelId);
+        console.log(`🏷️ Applied label "${categoryResult.category}" to email ${i + 1}/${successfulCategorizations.length}`);
+        
+        // Add delay between Gmail API calls to respect rate limits
+        if (i < successfulCategorizations.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 150)); // 150ms between Gmail calls
+        }
       }
 
-      // Update email_cache with AI results
+      // Update database (this can be fast, no external rate limits)
       const { error: updateError } = await supabase
         .from('email_cache')
         .update({
@@ -165,7 +169,8 @@ async function processBatch(
 
       if (updateError) {
         console.error(`Failed to update email ${email.id}:`, updateError);
-        return null;
+        updateResults.push(null);
+        continue;
       }
 
       // Remove from processing queue
@@ -175,18 +180,18 @@ async function processBatch(
         .eq('email_id', email.id)
         .eq('phase', 'categorize');
 
-      return {
+      updateResults.push({
         emailId: email.id,
         category: categoryResult.category,
         success: true
-      };
+      });
+
     } catch (error) {
       console.error(`Failed to process email ${result.email.id}:`, error);
-      return null;
+      updateResults.push(null);
     }
-  });
+  }
 
-  const updateResults = await Promise.all(updatePromises);
   const successfulUpdates = updateResults.filter(result => result !== null);
   const batchTime = Math.round(performance.now() - batchStartTime);
   
@@ -205,6 +210,9 @@ async function processBatch(
   // If more emails exist, process the next batch IMMEDIATELY (recursive call)
   if (remainingCount > 0) {
     console.log(`🔄 CONTINUING: ${remainingCount} emails still pending, processing next batch...`);
+    
+    // Add a small delay between batches to be extra safe with Gmail API
+    await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second between batches
     
     // Recursive call to process next batch
     const nextBatchResult = await processBatch(
@@ -243,7 +251,7 @@ export async function POST(request: NextRequest) {
     // Authentication (same logic as before)
     const session = await getServerSession(authOptions);
     const body = await request.json();
-    const { batchSize = 50, userId } = body;
+    const { batchSize = 50, userId } = body; // Keep your 50 email batch size
 
     // Create Supabase client locally (same logic)
     const { createClient } = await import('@supabase/supabase-js');
