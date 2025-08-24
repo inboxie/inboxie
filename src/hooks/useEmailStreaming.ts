@@ -185,7 +185,7 @@ export function useEmailStreaming() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          emailLimit: 50  // Request max, API will enforce actual limit
+          emailLimit: 100  // Request max, API will enforce actual limit
         }),
       });
 
@@ -204,7 +204,7 @@ export function useEmailStreaming() {
             await fetch('/api/process-background', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ batchSize: 10 })
+              body: JSON.stringify({ batchSize: 50 })
             });
             console.log('🤖 Background processing started');
             
