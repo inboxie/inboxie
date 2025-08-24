@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { emailLimit = 50 } = body;
+    const { emailLimit = 100 } = body;
     const userEmail = session.user.email;
     const accessToken = session.accessToken as string;
 

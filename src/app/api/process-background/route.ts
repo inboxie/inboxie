@@ -243,7 +243,7 @@ export async function POST(request: NextRequest) {
     // Authentication (same logic as before)
     const session = await getServerSession(authOptions);
     const body = await request.json();
-    const { batchSize = 10, userId } = body;
+    const { batchSize = 50, userId } = body;
 
     // Create Supabase client locally (same logic)
     const { createClient } = await import('@supabase/supabase-js');
