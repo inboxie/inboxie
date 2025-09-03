@@ -9,60 +9,69 @@ const openai = new OpenAI({
 
 /**
  * Feature 1: Categorize email using predefined categories (Free users)
- */
-/**
- * IMPROVED: Categorize email using predefined categories with better newsletter detection
+ * UPDATED: Removed aggressive pre-filtering, rely on better AI prompts
  */
 export async function categorizeEmailBasic(email: EmailData): Promise<CategoryResult> {
   try {
-    // Pre-check for obvious newsletters/marketing before AI analysis
-    const isNewsletter = detectNewsletter(email);
-    if (isNewsletter.isNewsletter) {
-      return {
-        category: 'Newsletter',
-        confidence: 0.95,
-        reason: isNewsletter.reason,
-      };
-    }
-
     const categories = APP_CONFIG.defaultCategories.join(', ');
     
     const prompt = `
-Analyze this email and categorize it. You must choose ONE category from this exact list: ${categories}
+Categorize this email. Choose exactly ONE category from: ${categories}
 
-Email Details:
 From: ${email.from}
 Subject: ${email.subject}
 Content: ${email.body.substring(0, 1500)}
 
-CRITICAL CATEGORIZATION RULES:
-1. NEWSLETTER/MARKETING: If sender is a company, brand, service, or has "unsubscribe", "promotional", "marketing" indicators → Newsletter
-2. WORK: Only if it's clearly business communication between colleagues/clients/vendors about work matters
-3. PERSONAL: Only if it's from a person you know personally (friends, family) about personal matters
-4. SUPPORT: Customer service, help desk, technical support, account issues
-5. SHOPPING: Order confirmations, shipping, receipts, e-commerce
-6. OTHER: Government, legal, medical, or unclear communications
+CATEGORIES EXPLAINED:
 
-SENDER ANALYSIS:
-- Does the sender domain look like a company/service? → Likely Newsletter
-- Does it have "no-reply", "noreply", "do-not-reply"? → Likely Newsletter  
-- Is it from a person's name + personal domain? → Could be Personal/Work
-- Is it from support@, help@, billing@? → Likely Support
+PERSONAL: Your personal life and accounts:
+- Personal banking, credit cards, loans (statements, notifications)
+- Personal investments, trading accounts, pensions (account updates)
+- Personal insurance, healthcare, utilities (bills, notifications)
+- Personal shopping, subscriptions (confirmations, renewals)
+- Friends, family communications
+- Personal services (gym, subscriptions, personal tools)
 
-SUBJECT ANALYSIS:
-- Contains "newsletter", "update", "digest", "weekly"? → Newsletter
-- Contains "order", "shipped", "receipt"? → Shopping
-- Contains "urgent", "action required", "verify"? → Could be Support
-- Contains personal names and casual language? → Personal
-- Contains business terms, meetings, projects? → Work
+WORK: Your job and professional business:
+- Emails from coworkers, managers, team members
+- Client communications, vendor discussions
+- Work project updates, meeting requests
+- Business development, professional networking
+- Work-related tools and systems (deployment alerts, work notifications)
+- Professional opportunities and career discussions
 
-Be VERY strict about what counts as "Work" vs "Newsletter". Most promotional emails should be Newsletter.
+NEWSLETTER: Mass marketing and promotional content:
+- Sales campaigns with discount offers
+- Company blog posts and content marketing
+- Industry news and insights (not personally addressed)
+- Product announcements and feature updates
+- Weekly/monthly company newsletters
+- Clear promotional campaigns designed to sell products
 
-Respond with JSON only:
+SHOPPING: E-commerce transactions:
+- Purchase confirmations and receipts
+- Shipping and delivery tracking
+- Return/exchange processes
+- Product recommendations after purchases
+
+SUPPORT: Customer service interactions:
+- Help desk tickets requiring your response
+- Account troubleshooting and technical issues
+- Service problems needing resolution
+- Billing disputes requiring action
+
+OTHER: Everything else:
+- Government, legal, medical communications
+- Educational content, research materials
+- Unclear or ambiguous emails
+
+IMPORTANT: Account notifications from financial services (banks, trading platforms, pensions) are PERSONAL, not newsletters. These are important personal account communications, not marketing.
+
+Respond in JSON:
 {
-  "category": "exact_category_name",
+  "category": "category_name",
   "confidence": 0.95,
-  "reason": "Brief explanation focusing on key indicators"
+  "reason": "Brief explanation"
 }`;
 
     const response = await openai.chat.completions.create({
@@ -70,14 +79,14 @@ Respond with JSON only:
       messages: [
         {
           role: 'system',
-          content: 'You are an expert email categorization assistant. Be VERY strict about Newsletter vs Work categorization. Most company/brand emails should be Newsletter, not Work. Always respond with valid JSON.'
+          content: 'You are an expert email categorization assistant. Be precise and conservative with Work categorization. Most company emails should be Newsletter unless they involve direct business collaboration. Always respond with valid JSON.'
         },
         {
           role: 'user',
           content: prompt
         }
       ],
-      temperature: 0.05, // Even lower temperature for more consistent results
+      temperature: 0.1, // Low temperature for consistent categorization
       max_tokens: 200,
     });
 
@@ -108,103 +117,6 @@ Respond with JSON only:
       reason: 'Error in categorization',
     };
   }
-}
-
-/**
- * Pre-check for newsletters using deterministic rules
- */
-function detectNewsletter(email: EmailData): { isNewsletter: boolean; reason: string } {
-  const from = email.from.toLowerCase();
-  const subject = email.subject.toLowerCase();
-  const body = email.body.toLowerCase().substring(0, 1000);
-
-  // Strong newsletter indicators in sender
-  const newsletterSenders = [
-    'no-reply', 'noreply', 'do-not-reply', 'donotreply',
-    'newsletter', 'news@', 'marketing@'
-  ];
-  
-  for (const indicator of newsletterSenders) {
-    if (from.includes(indicator)) {
-      return { isNewsletter: true, reason: `Newsletter sender pattern: ${indicator}` };
-    }
-  }
-
-  // Newsletter subject patterns
-  const newsletterSubjects = [
-    'newsletter', 'weekly update', 'monthly digest', 'news update',
-    'unsubscribe', 'view in browser', 'forward to a friend',
-    'breaking news', 'latest news', 'industry update'
-  ];
-
-  for (const pattern of newsletterSubjects) {
-    if (subject.includes(pattern)) {
-      return { isNewsletter: true, reason: `Newsletter subject pattern: ${pattern}` };
-    }
-  }
-
-  // Newsletter body patterns
-  const newsletterBodyPatterns = [
-    'unsubscribe', 'view in browser', 'forward this email',
-    'manage preferences', 'update subscription', 'privacy policy',
-    'you received this email because', 'if you no longer wish'
-  ];
-
-  for (const pattern of newsletterBodyPatterns) {
-    if (body.includes(pattern)) {
-      return { isNewsletter: true, reason: `Newsletter body pattern: ${pattern}` };
-    }
-  }
-
-  // Company domain patterns (common newsletter domains)
-  const companyDomains = [
-    '.com', '.co', '.io', '.net', '.org'
-  ];
-  
-  // If sender has company-like domain and no personal name, likely newsletter
-  const hasPersonalName = /^[A-Za-z]+ [A-Za-z]+/.test(email.from);
-  const hasCompanyDomain = companyDomains.some(domain => from.includes(domain));
-  
-  if (!hasPersonalName && hasCompanyDomain && from.includes('@')) {
-    // Additional check: is it a service/product name?
-    const serviceKeywords = ['app', 'service', 'platform', 'tool', 'system', 'bot'];
-    for (const keyword of serviceKeywords) {
-      if (from.includes(keyword)) {
-        return { isNewsletter: true, reason: `Service/company sender without personal name` };
-      }
-    }
-  }
-
-  return { isNewsletter: false, reason: 'Not detected as newsletter' };
-}
-
-/**
- * Additional helper: Detect work emails more accurately
- */
-function isWorkEmail(email: EmailData): boolean {
-  const from = email.from.toLowerCase();
-  const subject = email.subject.toLowerCase();
-  
-  // Work indicators
-  const workKeywords = [
-    'meeting', 'project', 'deadline', 'review', 'approval',
-    'client', 'customer', 'proposal', 'contract', 'budget',
-    'team', 'colleague', 'manager', 'director', 'ceo'
-  ];
-  
-  // Business email patterns
-  const businessDomains = [
-    // Common business email providers
-    'company.com', 'corp.com', 'inc.com',
-    // But exclude obvious newsletter services
-    '!mailchimp', '!constantcontact', '!sendgrid'
-  ];
-  
-  const hasWorkKeywords = workKeywords.some(keyword => 
-    subject.includes(keyword) || email.body.toLowerCase().includes(keyword)
-  );
-  
-  return hasWorkKeywords;
 }
 
 /**
@@ -246,7 +158,7 @@ Respond with JSON only:
 }`;
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini', // UPGRADED from gpt-3.5-turbo
+      model: 'gpt-4o-mini',
       messages: [
         {
           role: 'system',
@@ -295,12 +207,12 @@ Respond with JSON only:
  */
 export async function analyzeToneProfile(sentEmails: EmailData[]): Promise<ToneProfile> {
   try {
-    console.log(`🎯 Analyzing tone from ${sentEmails.length} sent emails...`);
+    console.log(`Analyzing tone from ${sentEmails.length} sent emails...`);
 
     // Combine email content for analysis
     const emailContent = sentEmails.map(email => 
       `Subject: ${email.subject}\nContent: ${email.body.substring(0, 500)}`
-    ).join('\n\n---\n\n').substring(0, 8000); // Limit to fit in context
+    ).join('\n\n---\n\n').substring(0, 8000);
 
     const prompt = `
 Analyze these sent emails to understand the user's writing tone and style:
@@ -322,7 +234,7 @@ Respond with JSON only:
 }`;
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini', // UPGRADED from gpt-3.5-turbo
+      model: 'gpt-4o-mini',
       messages: [
         {
           role: 'system',
@@ -343,15 +255,15 @@ Respond with JSON only:
     }
 
     // Clean the response - remove markdown code blocks if present
-const cleanContent = content
-.replace(/```json\s*/, '')  // Remove opening ```json
-.replace(/```\s*$/, '')     // Remove closing ```
-.trim();
+    const cleanContent = content
+      .replace(/```json\s*/, '')
+      .replace(/```\s*$/, '')
+      .trim();
 
-const analysis = JSON.parse(cleanContent);
+    const analysis = JSON.parse(cleanContent);
 
     return {
-      userId: 'current_user', // Will be replaced with actual user ID
+      userId: 'current_user',
       sentEmailsAnalyzed: sentEmails.length,
       toneCharacteristics: {
         formality: analysis.formality || 'mixed',
@@ -410,7 +322,7 @@ ${includeQuoting ? 'Include the quoted original email at the end.' : ''}
 Response:`;
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o', // UPGRADED from gpt-4 (better for complex tone matching)
+      model: 'gpt-4o',
       messages: [
         {
           role: 'system',
@@ -444,8 +356,8 @@ Response:`;
 export async function generateEmbedding(text: string): Promise<number[]> {
   try {
     const response = await openai.embeddings.create({
-      model: 'text-embedding-3-small', // UPGRADED from text-embedding-ada-002
-      input: text.substring(0, 8000), // Limit input size
+      model: 'text-embedding-3-small',
+      input: text.substring(0, 8000),
     });
 
     return response.data[0].embedding;
@@ -457,33 +369,29 @@ export async function generateEmbedding(text: string): Promise<number[]> {
 
 /**
  * Create inline quote reply format (Free Feature - No AI)
- * Now handles pre-formatted Superhuman-style content
  */
 export function createInlineQuoteReply(
   originalEmail: EmailData,
   userResponse: string
 ): string {
   try {
-    console.log('📝 Processing Superhuman-style reply...');
+    console.log('Processing reply...');
 
-    // The userResponse is already formatted with quotes and replies
-    // Just add a clean header and signature
     const cleanReply = `${userResponse}
 
 Best regards`;
 
-    console.log('✅ Processed Superhuman-style reply');
+    console.log('Processed reply');
     return cleanReply;
 
   } catch (error) {
-    console.error('❌ Error processing reply:', error);
-    return userResponse; // Fallback to original
+    console.error('Error processing reply:', error);
+    return userResponse;
   }
 }
-// Add this function to your src/lib/openai.ts file
 
 /**
- * Restructure email content for better readability (used in reply interfaces)
+ * Restructure email content for better readability
  */
 export async function restructureEmailContent(content: string): Promise<string> {
   try {
@@ -521,6 +429,6 @@ Return only the restructured text, nothing else.`
 
   } catch (error) {
     console.error('Error restructuring email content:', error);
-    return content; // Return original if restructuring fails
+    return content;
   }
 }
