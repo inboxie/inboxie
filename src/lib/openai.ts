@@ -121,8 +121,7 @@ function detectNewsletter(email: EmailData): { isNewsletter: boolean; reason: st
   // Strong newsletter indicators in sender
   const newsletterSenders = [
     'no-reply', 'noreply', 'do-not-reply', 'donotreply',
-    'newsletter', 'news@', 'updates@', 'marketing@', 
-    'hello@', 'team@', 'info@', 'contact@', 'support@'
+    'newsletter', 'news@', 'marketing@'
   ];
   
   for (const indicator of newsletterSenders) {
