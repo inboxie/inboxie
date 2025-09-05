@@ -18,7 +18,7 @@ export default function LoginPage() {
   useEffect(() => {
     getSession().then((session) => {
       if (session) {
-        router.push('/');
+        router.push('/dashboard');
       }
     });
   }, [router]);
@@ -27,12 +27,12 @@ export default function LoginPage() {
     setIsLoading(true);
     try {
       const result = await signIn('google', {
-        callbackUrl: '/',
+        callbackUrl: '/dashboard',
         redirect: false
       });
       
       if (result?.ok) {
-        router.push('/');
+        router.push('/dashboard');
       } else {
         console.error('Login failed:', result?.error);
         setIsLoading(false);

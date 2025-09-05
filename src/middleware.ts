@@ -9,13 +9,15 @@ export default withAuth(
   {
     callbacks: {
       authorized: ({ token, req }) => {
-        // Allow access to login page and auth routes
-        if (req.nextUrl.pathname.startsWith('/login') || 
-            req.nextUrl.pathname.startsWith('/api/auth')) {
+        // Allow access to public routes without authentication
+        if (req.nextUrl.pathname === '/' ||
+            req.nextUrl.pathname.startsWith('/login') || 
+            req.nextUrl.pathname.startsWith('/api/auth') ||
+            req.nextUrl.pathname.startsWith('/api/waitlist')) {
           return true;
         }
         
-        // For all other routes, require authentication
+        // For protected routes (like dashboard), require authentication
         return !!token;
       },
     },
@@ -23,8 +25,8 @@ export default withAuth(
 );
 
 export const config = {
-  // Protect all routes except login and auth
+  // Only protect dashboard routes specifically
   matcher: [
-    '/((?!login|api/auth|api/waitlist|_next/static|_next/image|favicon.ico).*)',
+    '/dashboard/:path*'
   ],
 };
