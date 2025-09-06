@@ -653,12 +653,13 @@ export async function getDatabaseStats(): Promise<{
 }
 
 /**
- * AI-POWERED Detect emails that need replies using OpenAI - FIXED VERSION
+ * Detect emails that need replies - UPDATED to read from database
  */
 export async function detectPendingReplies(userId: string): Promise<any[]> {
   try {
-    console.log('🤖 AI-powered pending reply detection starting...');
+    console.log('📭 Reading pending replies from database...');
 
+    // Simple database query - read from needs_reply column
     const { data: emails, error } = await supabase
       .from('email_cache')
       .select(`
@@ -672,73 +673,37 @@ export async function detectPendingReplies(userId: string): Promise<any[]> {
         )
       `)
       .eq('user_id', userId)
-      // 🚀 FIXED: Filter out emails that have been replied to
-      .is('reply_status', null)
-      .is('ai_replied_at', null)
+      .eq('needs_reply', true)  // Read from database instead of AI analysis
+      .eq('reply_status', 'none')  // Filter for emails that haven't been replied to
+      .is('ai_replied_at', null) // Still filter out emails with AI replies
       .order('created_at', { ascending: false })
-      .limit(50); // Analyze most recent 50 emails
+      .limit(50); // Get most recent 50 emails that need replies
 
     if (error) {
-      console.error('Error fetching emails for AI pending replies:', error);
+      console.error('Error fetching pending replies from database:', error);
       return [];
     }
 
     if (!emails || emails.length === 0) {
-      console.log('📭 No unreplied emails found');
+      console.log('📭 No emails need replies (from database)');
       return [];
     }
 
-    // Pre-filter obvious non-reply emails (performance optimization)
-    const candidateEmails = emails.filter(email => {
-      // 🚀 FIXED: Double-check - skip if already replied to
-      if (email.reply_status === 'draft_created' || 
-          email.reply_status === 'sent' ||
-          email.ai_replied_at) {
-        return false;
-      }
-
-      // Skip newsletters, automated emails, etc.
-      const skipCategories = ['newsletter', 'marketing', 'other'];
-      if (skipCategories.includes(email.ai_category?.toLowerCase())) {
-        return false;
-      }
-
-      // Skip no-reply emails
-      if (!email.from_addr || 
-          email.from_addr.includes('no-reply') || 
-          email.from_addr.includes('noreply') ||
-          email.from_addr.includes('donotreply')) {
-        return false;
-      }
-
-      // Must be recent (within last 14 days for AI analysis)
-      const emailDate = new Date(email.date_iso || email.created_at);
-      const fourteenDaysAgo = new Date();
-      fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
-      if (emailDate < fourteenDaysAgo) {
-        return false;
-      }
-
-      return true;
-    });
-
-    if (candidateEmails.length === 0) {
-      console.log('📭 No candidate emails for AI analysis (all replied or filtered out)');
-      return [];
-    }
-
-    console.log(`🔍 Analyzing ${candidateEmails.length} unreplied emails with AI...`);
-
-    // Analyze emails in batches with AI
-    const batchSize = 10; // Process 10 emails at a time
-    const pendingReplies = [];
-
-    for (let i = 0; i < candidateEmails.length; i += batchSize) {
-      const batch = candidateEmails.slice(i, i + batchSize);
-      
-      const aiResults = await analyzeEmailsForReplies(batch);
-      pendingReplies.push(...aiResults.filter(result => result.needsReply));
-    }
+    // Transform emails for frontend (same format as before)
+    const pendingReplies = emails.map(email => ({
+      id: email.id,
+      subject: email.subject,
+      from: email.from_addr,
+      snippet: email.subject,
+      category: email.ai_category,
+      aiReason: email.ai_reason,
+      processed_at: email.created_at,
+      date: email.date_iso || email.created_at,
+      threadId: email.email_details?.thread_id,
+      needsReply: true, // We know this is true since we filtered for needs_reply = 'yes'
+      aiReplyReason: email.reply_reason || 'AI analysis',
+      urgency: email.urgency || 'medium'
+    }));
 
     // Group by thread and only keep the most recent email from each thread
     const threadMap = new Map();
@@ -753,226 +718,28 @@ export async function detectPendingReplies(userId: string): Promise<any[]> {
     });
 
     const uniquePendingReplies = Array.from(threadMap.values())
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      .sort((a, b) => {
+        // Sort by urgency first, then by date
+        const urgencyOrder = { 'high': 3, 'medium': 2, 'low': 1 };
+        const urgencyDiff = urgencyOrder[b.urgency] - urgencyOrder[a.urgency];
+        if (urgencyDiff !== 0) return urgencyDiff;
+        
+        return new Date(b.date).getTime() - new Date(a.date).getTime();
+      })
       .slice(0, 15); // Top 15 most important
 
-    console.log(`✅ AI found ${uniquePendingReplies.length} unreplied emails needing replies`);
+    console.log(`✅ Found ${uniquePendingReplies.length} emails needing replies from database`);
+    console.log(`🔥 High priority: ${uniquePendingReplies.filter(e => e.urgency === 'high').length}`);
+    console.log(`⚡ Medium priority: ${uniquePendingReplies.filter(e => e.urgency === 'medium').length}`);
+    console.log(`📝 Low priority: ${uniquePendingReplies.filter(e => e.urgency === 'low').length}`);
     
     return uniquePendingReplies;
 
   } catch (error) {
-    console.error('Error in AI pending replies detection:', error);
+    console.error('Error reading pending replies from database:', error);
     
-    // Fallback to rule-based detection if AI fails
-    console.log('⚡ Falling back to rule-based detection...');
-    return await detectPendingRepliesFallback(userId);
-  }
-}
-
-/**
- * Analyze emails using OpenAI to determine if they need replies
- */
-async function analyzeEmailsForReplies(emails: any[]): Promise<any[]> {
-  try {
-    // Prepare email summaries for AI analysis
-    const emailSummaries = emails.map(email => ({
-      id: email.id,
-      from: email.from_addr,
-      subject: email.subject,
-      body: email.email_details?.body?.substring(0, 800) || email.subject,
-      category: email.ai_category
-    }));
-
-    const prompt = `Analyze these emails and determine which ones require a response from the recipient. 
-
-For each email, consider:
-- Is the sender asking a question or requesting information?
-- Does it require action, confirmation, or feedback?
-- Is it a request for a meeting, call, or collaboration?
-- Does it express urgency or importance?
-- Is it just informational (FYI) or automated?
-
-IGNORE emails that are:
-- Just informational updates or FYIs
-- Automated confirmations or receipts  
-- Marketing or promotional content
-- "Thank you" messages that don't require follow-up
-- Newsletter-style content
-
-Respond with a JSON array where each object has:
-{
-  "id": "email_id",
-  "needsReply": true/false,
-  "reason": "Brief explanation why it needs/doesn't need a reply",
-  "urgency": "low/medium/high"
-}
-
-Emails to analyze:
-${JSON.stringify(emailSummaries, null, 2)}`;
-
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini', // Fast and cost-effective for this task
-        messages: [
-          {
-            role: 'system',
-            content: 'You are an expert email assistant that helps identify which emails need responses. Be precise and practical.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: 0.1, // Low temperature for consistent results
-        max_tokens: 2000
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`OpenAI API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const aiResponse = data.choices[0]?.message?.content;
-
-    if (!aiResponse) {
-      throw new Error('No response from OpenAI');
-    }
-
-    // Parse AI response
-    let aiResults;
-    try {
-      // Extract JSON from the response (in case there's extra text)
-      const jsonMatch = aiResponse.match(/\[[\s\S]*\]/);
-      const jsonStr = jsonMatch ? jsonMatch[0] : aiResponse;
-      aiResults = JSON.parse(jsonStr);
-    } catch (parseError) {
-      console.error('Error parsing AI response:', parseError);
-      throw new Error('Failed to parse AI response');
-    }
-
-    // Combine AI results with original email data
-    const results = emails.map(email => {
-      const aiResult = aiResults.find(r => r.id === email.id);
-      
-      return {
-        id: email.id,
-        subject: email.subject,
-        from: email.from_addr,
-        snippet: email.subject,
-        category: email.ai_category,
-        aiReason: email.ai_reason,
-        processed_at: email.created_at,
-        date: email.date_iso || email.created_at,
-        threadId: email.email_details?.thread_id,
-        needsReply: aiResult?.needsReply || false,
-        aiReplyReason: aiResult?.reason || 'No AI analysis available',
-        urgency: aiResult?.urgency || 'low'
-      };
-    });
-
-    return results;
-
-  } catch (error) {
-    console.error('Error analyzing emails with AI:', error);
-    
-    // Return emails with needsReply: false if AI fails
-    return emails.map(email => ({
-      id: email.id,
-      subject: email.subject,
-      from: email.from_addr,
-      snippet: email.subject,
-      category: email.ai_category,
-      aiReason: email.ai_reason,
-      processed_at: email.created_at,
-      date: email.date_iso || email.created_at,
-      threadId: email.email_details?.[0]?.thread_id,
-      needsReply: false,
-      aiReplyReason: 'AI analysis failed',
-      urgency: 'low'
-    }));
-  }
-}
-
-/**
- * Fallback rule-based detection (original logic)
- */
-async function detectPendingRepliesFallback(userId: string): Promise<any[]> {
-  try {
-    console.log('🔄 Using fallback rule-based detection...');
-
-    const { data: emails, error } = await supabase
-      .from('email_cache')
-      .select(`
-        *,
-        email_details (
-          thread_id,
-          reply_to,
-          cc,
-          bcc
-        )
-      `)
-      .eq('user_id', userId)
-      // 🚀 FIXED: Also filter replied emails in fallback
-      .is('reply_status', null)
-      .is('ai_replied_at', null)
-      .order('created_at', { ascending: false })
-      .limit(30);
-
-    if (error || !emails) return [];
-
-    const pendingReplies = emails.filter(email => {
-      // Original rule-based logic
-      const relevantCategories = ['work', 'personal', 'support'];
-      if (!relevantCategories.includes(email.ai_category?.toLowerCase())) {
-        return false;
-      }
-
-      if (!email.from_addr || email.from_addr.includes('no-reply')) {
-        return false;
-      }
-
-      const emailDate = new Date(email.date_iso || email.created_at);
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      if (emailDate < thirtyDaysAgo) {
-        return false;
-      }
-
-      const needsReplyKeywords = [
-        '?', 'please', 'can you', 'could you', 'would you', 'let me know', 
-        'thoughts', 'feedback', 'opinion', 'meeting', 'schedule', 'urgent'
-      ];
-      
-      const emailContent = (email.subject || '').toLowerCase();
-      const hasReplyIndicators = needsReplyKeywords.some(keyword => 
-        emailContent.includes(keyword)
-      );
-
-      return hasReplyIndicators;
-    });
-
-    return pendingReplies.slice(0, 10).map(email => ({
-      id: email.id,
-      subject: email.subject,
-      from: email.from_addr,
-      snippet: email.subject,
-      category: email.ai_category,
-      aiReason: email.ai_reason,
-      processed_at: email.created_at,
-      date: email.date_iso || email.created_at,
-      needsReply: true,
-      aiReplyReason: 'Rule-based detection',
-      urgency: 'medium'
-    }));
-
-  } catch (error) {
-    console.error('Error in fallback detection:', error);
+    // No fallback needed - if database read fails, just return empty
+    console.log('❌ Database read failed, returning empty results');
     return [];
   }
 }

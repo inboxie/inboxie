@@ -95,7 +95,13 @@ Respond in JSON:
       throw new Error('No response from OpenAI');
     }
 
-    const result = JSON.parse(content);
+    // Clean the response - remove markdown code blocks if present
+    const cleanContent = content
+      .replace(/```json\s*/g, '')
+      .replace(/```\s*/g, '')
+      .trim();
+
+    const result = JSON.parse(cleanContent);
     
     // Validate the category is in our allowed list
     if (!APP_CONFIG.defaultCategories.includes(result.category)) {
@@ -178,7 +184,13 @@ Respond with JSON only:
       throw new Error('No response from OpenAI');
     }
 
-    const result = JSON.parse(content);
+    // Clean the response - remove markdown code blocks if present
+    const cleanContent = content
+      .replace(/```json\s*/g, '')
+      .replace(/```\s*/g, '')
+      .trim();
+
+    const result = JSON.parse(cleanContent);
     
     // Validate category exists in custom list
     const validCategory = customCategories.find(cat => cat.name === result.category);
@@ -199,6 +211,106 @@ Respond with JSON only:
       confidence: 0.5,
       reason: 'Error in categorization',
     };
+  }
+}
+
+/**
+ * Feature 2: Analyze if email needs a reply (Background processing)
+ */
+export async function analyzeEmailForReply(email: any): Promise<{
+  needsReply: boolean;
+  reason: string;
+  urgency: 'low' | 'medium' | 'high';
+}> {
+  try {
+    // Quick pre-filtering for obvious non-reply emails
+    const skipCategories = ['newsletter', 'marketing', 'other'];
+    if (skipCategories.includes(email.ai_category?.toLowerCase())) {
+      return { needsReply: false, reason: 'Newsletter/marketing email', urgency: 'low' };
+    }
+
+    if (!email.from_addr || 
+        email.from_addr.includes('no-reply') || 
+        email.from_addr.includes('noreply') ||
+        email.from_addr.includes('donotreply')) {
+      return { needsReply: false, reason: 'No-reply sender', urgency: 'low' };
+    }
+
+    // Check if email is recent (within 14 days)
+    const emailDate = new Date(email.date_iso || email.created_at);
+    const fourteenDaysAgo = new Date();
+    fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+    if (emailDate < fourteenDaysAgo) {
+      return { needsReply: false, reason: 'Email too old', urgency: 'low' };
+    }
+
+    const prompt = `
+Analyze this email and determine if it requires a response from the recipient.
+
+From: ${email.from_addr}
+Subject: ${email.subject}
+Category: ${email.ai_category}
+Body: ${email.subject || ''}
+
+Consider:
+- Is the sender asking a question or requesting information?
+- Does it require action, confirmation, or feedback?
+- Is it a request for a meeting, call, or collaboration?
+- Does it express urgency or importance?
+- Is the sender expecting a response?
+
+IGNORE emails that are:
+- Just informational updates or FYIs
+- Automated confirmations or receipts
+- Marketing or promotional content
+- "Thank you" messages that don't require follow-up
+- Newsletter-style content
+
+Respond with JSON only:
+{
+  "needsReply": true/false,
+  "reason": "Brief explanation why it needs/doesn't need a reply",
+  "urgency": "low/medium/high"
+}`;
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are an expert email assistant that helps identify which emails need responses. Be precise and practical. Always respond with valid JSON.'
+        },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      temperature: 0.1, // Low temperature for consistent results
+      max_tokens: 200,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error('No response from OpenAI');
+    }
+
+    // Clean the response - remove markdown code blocks if present
+    const cleanContent = content
+      .replace(/```json\s*/g, '')
+      .replace(/```\s*/g, '')
+      .trim();
+
+    const result = JSON.parse(cleanContent);
+    
+    return {
+      needsReply: result.needsReply || false,
+      reason: result.reason || 'AI analysis completed',
+      urgency: result.urgency || 'low'
+    };
+
+  } catch (error) {
+    console.error(`Reply analysis failed for email ${email.id}:`, error);
+    return { needsReply: false, reason: 'Analysis error', urgency: 'low' };
   }
 }
 

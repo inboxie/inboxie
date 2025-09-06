@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../auth/[...nextauth]/route';
 import { getGmailLabels, createGmailLabel, applyLabelToEmail } from '@/lib/gmail';
-import { categorizeEmailBasic } from '@/lib/openai';
+import { categorizeEmailBasic, analyzeEmailForReply } from '@/lib/openai';
 
 // Extract the core processing logic into a separate function for recursion
 async function processBatch(
@@ -109,6 +109,38 @@ async function processBatch(
 
   console.log(`✅ AI categorization complete: ${successfulCategorizations.length}/${emailsToProcess.length} successful`);
 
+  // NEW: BATCH REPLY ANALYSIS - Run in parallel with categorization results
+  console.log('💬 Running AI reply analysis in parallel...');
+  const replyAnalysisPromises = successfulCategorizations.map(async (result) => {
+    try {
+      // Add category to email for reply analysis
+      const emailWithCategory = {
+        ...result.email,
+        ai_category: result.categoryResult.category
+      };
+
+      const replyResult = await analyzeEmailForReply(emailWithCategory);
+      
+      return {
+        emailId: result.email.id,
+        ...replyResult,
+        success: true
+      };
+    } catch (error) {
+      console.error(`Reply analysis failed for email ${result.email.id}:`, error);
+      return {
+        emailId: result.email.id,
+        needsReply: false,
+        reason: 'Reply analysis error',
+        urgency: 'low',
+        success: false
+      };
+    }
+  });
+
+  const replyAnalysisResults = await Promise.all(replyAnalysisPromises);
+  console.log(`✅ AI reply analysis complete: ${replyAnalysisResults.filter(r => r.success).length}/${successfulCategorizations.length} successful`);
+
   // Create missing Gmail labels in batch (same logic)
   const neededCategories = new Set<string>();
   successfulCategorizations.forEach(result => {
@@ -157,13 +189,21 @@ async function processBatch(
         }
       }
 
-      // Update database (this can be fast, no external rate limits)
+      // NEW: Get reply analysis result for this email
+      const replyResult = replyAnalysisResults.find(r => r.emailId === email.id);
+
+      // Update database with BOTH categorization AND reply analysis
       const { error: updateError } = await supabase
         .from('email_cache')
         .update({
           ai_category: categoryResult.category,
           ai_reason: categoryResult.reason || 'AI categorization',
-          status: 'categorized'
+          status: 'categorized',
+          // NEW: Add reply analysis fields (using correct column names)
+          needs_reply: replyResult?.needsReply || false,
+          reply_reason: replyResult?.reason || 'No analysis',
+          urgency: replyResult?.urgency || 'low',
+          ai_analyzed_at: new Date().toISOString()
         })
         .eq('id', email.id);
 
@@ -183,6 +223,8 @@ async function processBatch(
       updateResults.push({
         emailId: email.id,
         category: categoryResult.category,
+        needsReply: replyResult?.needsReply || false,
+        replyReason: replyResult?.reason || 'No analysis',
         success: true
       });
 
@@ -196,6 +238,7 @@ async function processBatch(
   const batchTime = Math.round(performance.now() - batchStartTime);
   
   console.log(`🤖 BATCH COMPLETE: ${successfulUpdates.length} emails processed in ${batchTime}ms`);
+  console.log(`💬 Reply analysis: ${successfulUpdates.filter(r => r.needsReply).length} emails need replies`);
 
   // Check if more emails need processing
   const remainingEmails = await supabase
@@ -246,7 +289,7 @@ export async function POST(request: NextRequest) {
   const startTime = performance.now();
   
   try {
-    console.log('🤖 BACKGROUND AI: Starting background processing...');
+    console.log('🤖 BACKGROUND AI: Starting background processing with reply analysis...');
 
     // Authentication (same logic as before)
     const session = await getServerSession(authOptions);
@@ -286,15 +329,19 @@ export async function POST(request: NextRequest) {
     const result = await processBatch(supabase, accessToken, batchSize, userId);
     
     const totalTime = Math.round(performance.now() - startTime);
+    const repliesFound = result.results.filter(r => r.needsReply).length;
+    
     console.log(`🎉 ALL BACKGROUND PROCESSING COMPLETE: ${result.totalProcessed} total emails processed in ${totalTime}ms`);
+    console.log(`💬 REPLY ANALYSIS COMPLETE: ${repliesFound} emails need replies`);
 
     return NextResponse.json({
       success: true,
-      message: `🎉 All background processing complete! ${result.totalProcessed} emails processed.`,
+      message: `🎉 All background processing complete! ${result.totalProcessed} emails processed, ${repliesFound} need replies.`,
       data: {
         processed: result.totalProcessed,
         allComplete: result.allComplete,
         processingTimeMs: totalTime,
+        repliesFound: repliesFound,
         results: result.results
       }
     });
