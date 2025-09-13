@@ -1,157 +1,181 @@
-// background.js - Service Worker with OAuth handling
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === 'authenticate') {
-      handleAuthentication(request.apiBaseUrl)
-        .then(result => sendResponse({ success: true, token: result }))
-        .catch(error => sendResponse({ success: false, error: error.message }));
-      return true; // Keep message channel open for async response
+// auth.js - Content Script with Background Communication
+class ExtensionAuth {
+    constructor(apiBaseUrl) {
+      this.apiBaseUrl = apiBaseUrl;
+      this.extensionId = chrome.runtime.id;
     }
-    
-    if (request.action === 'validateToken') {
-      validateToken(request.token, request.apiBaseUrl)
-        .then(valid => sendResponse({ success: true, valid: valid }))
-        .catch(error => sendResponse({ success: false, error: error.message }));
-      return true;
-    }
-  });
   
-  /**
-   * Handle OAuth authentication flow
-   */
-  async function handleAuthentication(apiBaseUrl) {
-    try {
-      console.log('Background: Starting OAuth authentication...');
-      
-      // Get OAuth token using Chrome identity API
-      const googleToken = await getChromeIdentityToken();
-      
-      if (!googleToken) {
-        throw new Error('Failed to get OAuth token from Chrome');
+    /**
+     * Check if user is authenticated by validating stored token
+     */
+    async isAuthenticated() {
+      try {
+        const token = await this.getStoredToken();
+        if (!token) return false;
+  
+        // Use background script to validate token
+        return await this.sendMessageToBackground('validateToken', {
+          token: token,
+          apiBaseUrl: this.apiBaseUrl
+        });
+      } catch (error) {
+        console.error('Authentication check failed:', error);
+        return false;
       }
-      
-      console.log('Background: Got Chrome token, exchanging with backend...');
-      
-      // Exchange Google token for backend JWT
-      const backendToken = await exchangeTokenWithBackend(googleToken, apiBaseUrl);
-      
-      // Store the backend JWT token
-      await storeToken(backendToken);
-      
-      console.log('Background: Authentication successful!');
-      return backendToken;
-      
-    } catch (error) {
-      console.error('Background: Authentication failed:', error);
-      throw error;
     }
-  }
   
-  /**
-   * Get OAuth token using Chrome identity API
-   */
-  async function getChromeIdentityToken() {
-    return new Promise((resolve, reject) => {
-      const redirectUrl = chrome.identity.getRedirectURL();
-      const clientId = '133159620285-a1pmrljedhia4afuv0o639i1u22vobpp.apps.googleusercontent.com';
-      
-      const authUrl = `https://accounts.google.com/oauth/authorize?` +
-        `client_id=${clientId}&` +
-        `response_type=token&` +
-        `scope=email%20profile%20openid&` +
-        `redirect_uri=${encodeURIComponent(redirectUrl)}`;
-  
-      console.log('Background: Starting OAuth with URL:', authUrl);
-      console.log('Background: Redirect URL:', redirectUrl);
-  
-      chrome.identity.launchWebAuthFlow({
-        url: authUrl,
-        interactive: true
-      }, (responseUrl) => {
-        if (chrome.runtime.lastError) {
-          console.error('Background: Chrome identity error:', chrome.runtime.lastError);
-          reject(chrome.runtime.lastError);
-        } else if (responseUrl) {
-          console.log('Background: OAuth response URL received');
-          // Extract access token from response URL
-          const url = new URL(responseUrl);
-          const fragment = url.hash.substring(1);
-          const params = new URLSearchParams(fragment);
-          const accessToken = params.get('access_token');
-          
-          if (accessToken) {
-            console.log('Background: Access token extracted successfully');
-            resolve(accessToken);
-          } else {
-            reject(new Error('No access token found in response'));
-          }
+    /**
+     * Authenticate user using background script
+     */
+    async authenticate() {
+      try {
+        console.log('Content: Starting authentication...');
+        
+        // Send authentication request to background script
+        const result = await this.sendMessageToBackground('authenticate', {
+          apiBaseUrl: this.apiBaseUrl
+        });
+        
+        if (result.success) {
+          console.log('Content: Authentication successful!');
+          return true;
         } else {
-          reject(new Error('No response URL received'));
+          throw new Error(result.error || 'Authentication failed');
         }
+  
+      } catch (error) {
+        console.error('Content: Authentication failed:', error);
+        console.error('Content: Error details:', error.message);
+        console.error('Content: Full error object:', error);
+        alert(`Authentication failed: ${error.message}`);
+        return false;
+      }
+    }
+  
+    /**
+     * Send message to background script
+     */
+    async sendMessageToBackground(action, data) {
+      return new Promise((resolve, reject) => {
+        console.log(`Content: Sending message to background - Action: ${action}`, data);
+        
+        chrome.runtime.sendMessage({ action, ...data }, (response) => {
+          console.log('Content: Received response from background:', response);
+          
+          if (chrome.runtime.lastError) {
+            console.error('Content: Runtime error:', chrome.runtime.lastError);
+            reject(chrome.runtime.lastError);
+          } else if (!response) {
+            console.error('Content: No response from background script');
+            reject(new Error('No response from background script'));
+          } else if (response.success) {
+            resolve(response);
+          } else {
+            console.error('Content: Background script returned error:', response.error);
+            reject(new Error(response.error || 'Unknown error'));
+          }
+        });
       });
-    });
-  }
-  
-  /**
-   * Exchange Google OAuth token for backend JWT token
-   */
-  async function exchangeTokenWithBackend(googleToken, apiBaseUrl) {
-    const response = await fetch(`${apiBaseUrl}/api/extension/auth`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        googleToken: googleToken,
-        extensionId: chrome.runtime.id
-      })
-    });
-  
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(`Backend auth failed: ${error.error || response.statusText}`);
     }
   
-    const data = await response.json();
-    if (!data.success || !data.token) {
-      throw new Error('Invalid response from backend');
-    }
+    /**
+     * Make authenticated API calls
+     */
+    async apiCall(endpoint, options = {}) {
+      const token = await this.getStoredToken();
+      
+      if (!token) {
+        throw new Error('Not authenticated - please log in');
+      }
   
-    return data.token;
-  }
-  
-  /**
-   * Validate token with backend
-   */
-  async function validateToken(token, apiBaseUrl) {
-    try {
-      const response = await fetch(`${apiBaseUrl}/api/extension/validate`, {
-        method: 'GET',
+      const response = await fetch(`${this.apiBaseUrl}${endpoint}`, {
+        ...options,
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          ...options.headers
         }
       });
-      return response.ok;
-    } catch (error) {
-      console.error('Background: Token validation failed:', error);
-      return false;
+  
+      if (response.status === 401) {
+        // Token expired or invalid - clear it and require re-auth
+        await this.clearAuth();
+        throw new Error('Session expired - please log in again');
+      }
+  
+      return response;
+    }
+  
+    /**
+     * Get stored JWT token
+     */
+    async getStoredToken() {
+      return new Promise((resolve, reject) => {
+        chrome.storage.local.get(['inboxie_jwt_token', 'inboxie_auth_timestamp'], (result) => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+          } else {
+            // Check if token exists and isn't too old (30 days as per backend)
+            const token = result.inboxie_jwt_token;
+            const timestamp = result.inboxie_auth_timestamp;
+            
+            if (!token || !timestamp) {
+              resolve(null);
+              return;
+            }
+  
+            // Check if token is older than 29 days (give 1 day buffer)
+            const daysDiff = (Date.now() - timestamp) / (1000 * 60 * 60 * 24);
+            if (daysDiff > 29) {
+              // Token too old, clear it
+              this.clearAuth();
+              resolve(null);
+            } else {
+              resolve(token);
+            }
+          }
+        });
+      });
+    }
+  
+    /**
+     * Clear stored authentication
+     */
+    async clearAuth() {
+      return new Promise((resolve, reject) => {
+        // Clear from Chrome storage
+        chrome.storage.local.remove(['inboxie_jwt_token', 'inboxie_auth_timestamp'], () => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+          } else {
+            console.log('Authentication cleared');
+            resolve();
+          }
+        });
+      });
+    }
+  
+    /**
+     * Sign out user
+     */
+    async signOut() {
+      await this.clearAuth();
+      alert('Signed out successfully. Refresh Gmail to see changes.');
+    }
+  
+    /**
+     * Get user info (placeholder for future use)
+     */
+    getUserInfo() {
+      return null;
+    }
+  
+    /**
+     * Load stored auth (placeholder for compatibility)
+     */
+    async loadStoredAuth() {
+      return await this.getStoredToken();
     }
   }
   
-  /**
-   * Store JWT token in Chrome storage
-   */
-  async function storeToken(token) {
-    return new Promise((resolve, reject) => {
-      chrome.storage.local.set({
-        'inboxie_jwt_token': token,
-        'inboxie_auth_timestamp': Date.now()
-      }, () => {
-        if (chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError);
-        } else {
-          resolve();
-        }
-      });
-    });
-  }
+  window.ExtensionAuth = ExtensionAuth;
