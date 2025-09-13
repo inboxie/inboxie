@@ -1,0 +1,60 @@
+.
+├── eslint.config.mjs
+├── next-env.d.ts
+├── next.config.ts
+├── package-lock.json
+├── package.json
+├── postcss.config.js
+├── postcss.config.mjs
+├── public
+│   ├── file.svg
+│   ├── globe.svg
+│   ├── images
+│   │   └── inboxie-logo.png
+│   ├── next.svg
+│   ├── vercel.svg
+│   └── window.svg
+├── README.md
+├── src
+│   ├── app
+│   │   ├── api
+│   │   │   ├── auth
+│   │   │   │   └── [...nextauth]
+│   │   │   ├── get-user-stats
+│   │   │   │   └── route.ts
+│   │   │   ├── process-emails
+│   │   │   │   └── route.ts
+│   │   │   ├── process-emails-fast
+│   │   │   │   └── route.ts
+│   │   │   ├── process-emails-stream
+│   │   │   │   └── route.ts
+│   │   │   ├── update-user-plan
+│   │   │   │   └── route.ts
+│   │   │   └── waitlist
+│   │   │       └── route.ts
+│   │   ├── dashboard
+│   │   │   └── page.tsx
+│   │   ├── favicon.ico
+│   │   ├── globals.css
+│   │   ├── layout.tsx
+│   │   ├── login
+│   │   │   └── page.tsx
+│   │   ├── page.tsx
+│   │   └── providers
+│   │       └── SessionProvider.tsx
+│   ├── config
+│   │   ├── app.ts
+│   │   └── plans.ts
+│   ├── lib
+│   │   ├── gmail.ts
+│   │   ├── openai.ts
+│   │   └── supabase.ts
+│   ├── middleware.ts
+│   └── types
+│       ├── index.ts
+│       └── next-auth.d.ts
+├── structure.txt
+├── tailwind.config.js
+└── tsconfig.json
+
+20 directories, 38 files
