@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Inboxie - AI Email Assistant",
+  "version": "1.0",
+  "description": "AI-powered email organization and analytics for Gmail",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "identity"
+  ],
+  "host_permissions": [
+    "https://mail.google.com/*",
+    "http://localhost:3000/*",
+    "https://inboxie.ai/*"
+  ],
+  "oauth2": {
+    "client_id": "133159620285-a1pmrljedhia4afuv0o639i1u22vobpp.apps.googleusercontent.com",
+    "scopes": ["email", "profile", "openid"]
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://mail.google.com/*"],
+      "js": ["auth.js", "content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_end"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Inboxie Dashboard"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["styles.css"],
+      "matches": ["https://mail.google.com/*"]
+    }
+  ]
+}
