@@ -4,24 +4,56 @@ import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../auth/[...nextauth]/route';
 import { getOrCreateUser, checkUserLimits, detectPendingReplies} from '@/lib/supabase';
 import { createClient } from '@supabase/supabase-js';
+import jwt from 'jsonwebtoken';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_ANON_KEY!
 );
 
+const JWT_SECRET = process.env.NEXTAUTH_SECRET || 'your-fallback-secret';
+
+// Helper function to get user email from either NextAuth session OR extension JWT
+async function getUserEmail(request: NextRequest): Promise<string | null> {
+  // Try NextAuth session first (for web app)
+  const session = await getServerSession(authOptions);
+  if (session?.user?.email) {
+    console.log('🌐 Using NextAuth session for:', session.user.email);
+    return session.user.email;
+  }
+
+  // Try extension JWT token (for Chrome extension)
+  const authHeader = request.headers.get('authorization');
+  if (authHeader?.startsWith('Bearer ')) {
+    const token = authHeader.substring(7);
+    
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET) as any;
+      if (decoded.email && decoded.type === 'extension') {
+        console.log('🔧 Using extension JWT for:', decoded.email);
+        return decoded.email;
+      }
+    } catch (error) {
+      console.error('❌ Invalid extension JWT:', error);
+    }
+  }
+
+  return null;
+}
+
 export async function GET(request: NextRequest) {
   try {
-    // Get the authenticated session
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    // Get user email from either NextAuth session or extension JWT
+    const userEmail = await getUserEmail(request);
+    
+    if (!userEmail) {
       return NextResponse.json({
         success: false,
         error: 'Authentication required'
       }, { status: 401 });
     }
 
-    const userEmail = session.user.email;
+    console.log('📊 Getting user stats for:', userEmail);
 
     // Get user
     const user = await getOrCreateUser(userEmail);
