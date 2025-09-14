@@ -79,11 +79,10 @@ class ExtensionAuth {
   }
 
   /**
-   * Make authenticated API calls with both tokens
+   * Make authenticated API calls with conditional token handling
    */
   async apiCall(endpoint, options = {}) {
     const jwtToken = await this.getStoredToken();
-    const googleToken = await this.getStoredGoogleToken();
     
     if (!jwtToken) {
       throw new Error('Not authenticated - please log in');
@@ -95,9 +94,12 @@ class ExtensionAuth {
       ...options.headers
     };
 
-    // Add Google token for Gmail API calls
-    if (googleToken) {
-      headers['X-Google-Token'] = googleToken;
+    // Only add Google token for Gmail API calls (not for get-user-stats)
+    if (endpoint.includes('process-emails')) {
+      const googleToken = await this.getStoredGoogleToken();
+      if (googleToken) {
+        headers['X-Google-Token'] = googleToken;
+      }
     }
 
     const response = await fetch(`${this.apiBaseUrl}${endpoint}`, {

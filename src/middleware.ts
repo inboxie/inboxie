@@ -10,7 +10,7 @@ export default withAuth(
     if (req.nextUrl.pathname.startsWith('/api/')) {
       response.headers.set('Access-Control-Allow-Origin', 'https://mail.google.com');
       response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-      response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Google-Token');
       response.headers.set('Access-Control-Allow-Credentials', 'true');
       
       // Handle preflight OPTIONS requests
@@ -20,7 +20,7 @@ export default withAuth(
           headers: {
             'Access-Control-Allow-Origin': 'https://mail.google.com',
             'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Google-Token',
             'Access-Control-Allow-Credentials': 'true'
           }
         });
