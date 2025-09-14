@@ -1,4 +1,4 @@
-// src/lib/openai.ts - In-Memory Processing (Privacy-First)
+// src/lib/openai.ts - In-Memory Processing (Privacy-First) + Reply Analysis
 import OpenAI from 'openai';
 import { APP_CONFIG } from '@/config/app';
 
@@ -117,6 +117,106 @@ Respond with just the category name: Work, Personal, Newsletter, Shopping, Suppo
 }
 
 /**
+ * NEW: Analyze if email needs a reply (Background processing)
+ */
+export async function analyzeEmailForReply(email: any): Promise<{
+  needsReply: boolean;
+  reason: string;
+  urgency: 'low' | 'medium' | 'high';
+}> {
+  try {
+    // Quick pre-filtering for obvious non-reply emails
+    const skipCategories = ['newsletter', 'marketing', 'other'];
+    if (skipCategories.includes(email.ai_category?.toLowerCase())) {
+      return { needsReply: false, reason: 'Newsletter/marketing email', urgency: 'low' };
+    }
+
+    if (!email.from || 
+        email.from.includes('no-reply') || 
+        email.from.includes('noreply') ||
+        email.from.includes('donotreply')) {
+      return { needsReply: false, reason: 'No-reply sender', urgency: 'low' };
+    }
+
+    // Check if email is recent (within 14 days)
+    const emailDate = new Date(email.date);
+    const fourteenDaysAgo = new Date();
+    fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+    if (emailDate < fourteenDaysAgo) {
+      return { needsReply: false, reason: 'Email too old', urgency: 'low' };
+    }
+
+    const prompt = `
+Analyze this email and determine if it requires a response from the recipient.
+
+From: ${email.from}
+Subject: ${email.subject}
+Category: ${email.category || 'Unknown'}
+Body: ${email.body || email.snippet || ''}
+
+Consider:
+- Is the sender asking a question or requesting information?
+- Does it require action, confirmation, or feedback?
+- Is it a request for a meeting, call, or collaboration?
+- Does it express urgency or importance?
+- Is the sender expecting a response?
+
+IGNORE emails that are:
+- Just informational updates or FYIs
+- Automated confirmations or receipts
+- Marketing or promotional content
+- "Thank you" messages that don't require follow-up
+- Newsletter-style content
+
+Respond with JSON only:
+{
+  "needsReply": true/false,
+  "reason": "Brief explanation why it needs/doesn't need a reply",
+  "urgency": "low/medium/high"
+}`;
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are an expert email assistant that helps identify which emails need responses. Be precise and practical. Always respond with valid JSON.'
+        },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      temperature: 0.1, // Low temperature for consistent results
+      max_tokens: 200,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error('No response from OpenAI');
+    }
+
+    // Clean the response - remove markdown code blocks if present
+    const cleanContent = content
+      .replace(/```json\s*/g, '')
+      .replace(/```\s*/g, '')
+      .trim();
+
+    const result = JSON.parse(cleanContent);
+    
+    return {
+      needsReply: result.needsReply || false,
+      reason: result.reason || 'AI analysis completed',
+      urgency: result.urgency || 'low'
+    };
+
+  } catch (error) {
+    console.error(`Reply analysis failed for email ${email.id}:`, error);
+    return { needsReply: false, reason: 'Analysis error', urgency: 'low' };
+  }
+}
+
+/**
  * Batch categorize multiple emails for efficiency (in-memory processing)
  * All email content is processed and immediately discarded
  */
@@ -207,6 +307,60 @@ Use the same categorization rules as before. Respond with just the category name
 }
 
 /**
+ * NEW: Batch analyze emails for reply requirements
+ */
+export async function analyzeEmailsForReplyBatch(emails: any[]): Promise<Array<{
+  id: string;
+  needsReply: boolean;
+  reason: string;
+  urgency: 'low' | 'medium' | 'high';
+}>> {
+  try {
+    if (emails.length === 0) return [];
+    
+    // For small batches, analyze individually for better accuracy
+    if (emails.length <= 3) {
+      console.log(`Analyzing ${emails.length} emails for replies individually`);
+      const results = await Promise.all(
+        emails.map(async email => {
+          const analysis = await analyzeEmailForReply(email);
+          return {
+            id: email.id,
+            ...analysis
+          };
+        })
+      );
+      return results;
+    }
+
+    // For larger batches, use individual processing (reply analysis is complex)
+    console.log(`Analyzing ${emails.length} emails for replies individually`);
+    const results = await Promise.all(
+      emails.map(async email => {
+        const analysis = await analyzeEmailForReply(email);
+        return {
+          id: email.id,
+          ...analysis
+        };
+      })
+    );
+
+    console.log(`Reply analysis complete: ${results.filter(r => r.needsReply).length}/${results.length} need replies`);
+    return results;
+
+  } catch (error) {
+    console.error('Error in batch reply analysis:', error);
+    // Return safe defaults
+    return emails.map(email => ({
+      id: email.id,
+      needsReply: false,
+      reason: 'Analysis error',
+      urgency: 'low' as const
+    }));
+  }
+}
+
+/**
  * Process emails and return only metadata (content discarded immediately)
  * This function demonstrates the in-memory processing approach
  */
@@ -244,6 +398,71 @@ export async function processEmailsInMemory(emails: EmailData[]): Promise<Array<
       category: 'Other',
       date: email.date,
       threadId: email.threadId || email.id
+    }));
+  }
+}
+
+/**
+ * NEW: Process emails with both categorization AND reply analysis
+ * Returns enhanced metadata with reply information
+ */
+export async function processEmailsWithReplyAnalysis(emails: EmailData[]): Promise<Array<{
+  id: string;
+  category: string;
+  date: string;
+  threadId: string;
+  needsReply: boolean;
+  replyReason: string;
+  urgency: 'low' | 'medium' | 'high';
+}>> {
+  try {
+    console.log(`Processing ${emails.length} emails with categorization + reply analysis (content will be discarded)`);
+    
+    // Step 1: Categorize emails
+    const emailCategories = await categorizeEmailsBatch(emails);
+    
+    // Step 2: Prepare emails for reply analysis (add categories)
+    const emailsWithCategories = emails.map((email, index) => ({
+      ...email,
+      category: emailCategories[index] || 'Other'
+    }));
+    
+    // Step 3: Analyze for replies
+    const replyAnalysis = await analyzeEmailsForReplyBatch(emailsWithCategories);
+    
+    // Step 4: Combine results and extract only metadata
+    const results = emails.map((email, index) => {
+      const replyInfo = replyAnalysis.find(r => r.id === email.id);
+      
+      return {
+        id: email.id,
+        category: emailCategories[index] || 'Other',
+        date: email.date,
+        threadId: email.threadId || email.id,
+        needsReply: replyInfo?.needsReply || false,
+        replyReason: replyInfo?.reason || 'No analysis',
+        urgency: replyInfo?.urgency || 'low'
+      };
+    });
+    
+    // At this point, email content is out of scope and will be garbage collected
+    console.log(`Enhanced processing complete. Content discarded, returning ${results.length} metadata records with reply analysis`);
+    console.log(`Reply summary: ${results.filter(r => r.needsReply).length} emails need replies`);
+    
+    return results;
+    
+  } catch (error) {
+    console.error('Error in enhanced email processing:', error);
+    
+    // Return basic metadata even on error
+    return emails.map(email => ({
+      id: email.id,
+      category: 'Other',
+      date: email.date,
+      threadId: email.threadId || email.id,
+      needsReply: false,
+      replyReason: 'Processing error',
+      urgency: 'low' as const
     }));
   }
 }

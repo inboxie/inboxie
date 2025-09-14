@@ -1,4 +1,4 @@
-// src/lib/supabase.ts - Simplified for Chrome Extension
+// src/lib/supabase.ts - Simplified for Chrome Extension + Reply Analysis
 import { createClient } from '@supabase/supabase-js';
 import { getEmailLimit } from '@/config/plans';
 
@@ -25,6 +25,9 @@ export interface EmailOrganization {
   date_iso: string;
   ai_category: string;
   gmail_thread_id: string;
+  needs_reply: boolean;
+  reply_reason: string;
+  urgency: 'low' | 'medium' | 'high';
   processed_at: string;
   created_at: string;
 }
@@ -182,18 +185,21 @@ export async function updateUserEmailCount(userId: string, increment: number = 1
 }
 
 /**
- * EMAIL ORGANIZATION (Privacy-First)
+ * EMAIL ORGANIZATION (Privacy-First + Reply Analysis)
  */
 
 /**
- * Save email organization data (no PII)
+ * Save email organization data with reply analysis (no PII)
  */
 export async function saveEmailOrganization(
   gmailId: string,
   userId: string,
   category: string,
   dateIso: string,
-  threadId?: string
+  threadId?: string,
+  needsReply?: boolean,
+  replyReason?: string,
+  urgency?: 'low' | 'medium' | 'high'
 ): Promise<EmailOrganization> {
   try {
     const { data, error } = await supabase
@@ -205,6 +211,9 @@ export async function saveEmailOrganization(
           ai_category: category,
           date_iso: dateIso,
           gmail_thread_id: threadId || gmailId,
+          needs_reply: needsReply || false,
+          reply_reason: replyReason || 'No analysis',
+          urgency: urgency || 'low',
           processed_at: new Date().toISOString(),
           created_at: new Date().toISOString(),
         },
@@ -216,7 +225,7 @@ export async function saveEmailOrganization(
       throw error;
     }
 
-    console.log(`✅ Saved email organization: ${gmailId} -> ${category}`);
+    console.log(`✅ Saved email organization: ${gmailId} -> ${category} (Reply: ${needsReply ? 'Yes' : 'No'})`);
     return data;
 
   } catch (error) {
@@ -251,18 +260,57 @@ export async function getProcessedEmailIds(userId: string): Promise<string[]> {
 }
 
 /**
+ * Get emails that need replies for Chrome extension
+ */
+export async function getPendingReplies(userId: string): Promise<Array<{
+  id: string;
+  category: string;
+  urgency: 'low' | 'medium' | 'high';
+  reply_reason: string;
+  date_iso: string;
+}>> {
+  try {
+    const { data, error } = await supabase
+      .from('email_cache_simple')
+      .select('id, ai_category, urgency, reply_reason, date_iso')
+      .eq('user_id', userId)
+      .eq('needs_reply', true)
+      .order('urgency', { ascending: false }) // High urgency first
+      .order('date_iso', { ascending: false }); // Recent first
+
+    if (error) {
+      throw error;
+    }
+
+    return (data || []).map(item => ({
+      id: item.id,
+      category: item.ai_category,
+      urgency: item.urgency,
+      reply_reason: item.reply_reason,
+      date_iso: item.date_iso
+    }));
+
+  } catch (error) {
+    console.error('Error fetching pending replies:', error);
+    return [];
+  }
+}
+
+/**
  * Get email organization stats for dashboard
  */
 export async function getEmailOrganizationStats(userId: string): Promise<{
   totalEmails: number;
   categoryBreakdown: { [category: string]: number };
   recentActivity: Array<{ date: string; count: number; category: string }>;
+  pendingReplies: number;
+  urgencyBreakdown: { high: number; medium: number; low: number };
 }> {
   try {
     // Get all organization data for user
     const { data, error } = await supabase
       .from('email_cache_simple')
-      .select('ai_category, date_iso, created_at')
+      .select('ai_category, date_iso, created_at, needs_reply, urgency')
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
 
@@ -274,7 +322,9 @@ export async function getEmailOrganizationStats(userId: string): Promise<{
       return {
         totalEmails: 0,
         categoryBreakdown: {},
-        recentActivity: []
+        recentActivity: [],
+        pendingReplies: 0,
+        urgencyBreakdown: { high: 0, medium: 0, low: 0 }
       };
     }
 
@@ -284,6 +334,15 @@ export async function getEmailOrganizationStats(userId: string): Promise<{
       acc[category] = (acc[category] || 0) + 1;
       return acc;
     }, {} as { [category: string]: number });
+
+    // Calculate pending replies stats
+    const pendingReplies = data.filter(item => item.needs_reply).length;
+    const urgencyBreakdown = data
+      .filter(item => item.needs_reply)
+      .reduce((acc, item) => {
+        acc[item.urgency] = (acc[item.urgency] || 0) + 1;
+        return acc;
+      }, { high: 0, medium: 0, low: 0 });
 
     // Calculate recent activity (last 30 days by date)
     const thirtyDaysAgo = new Date();
@@ -315,12 +374,14 @@ export async function getEmailOrganizationStats(userId: string): Promise<{
       .sort((a, b) => b.date.localeCompare(a.date))
       .slice(0, 50); // Last 50 data points
 
-    console.log(`📊 Email organization stats: ${data.length} total emails, ${Object.keys(categoryBreakdown).length} categories`);
+    console.log(`📊 Email organization stats: ${data.length} total emails, ${pendingReplies} need replies`);
 
     return {
       totalEmails: data.length,
       categoryBreakdown,
-      recentActivity
+      recentActivity,
+      pendingReplies,
+      urgencyBreakdown
     };
 
   } catch (error) {
@@ -328,7 +389,9 @@ export async function getEmailOrganizationStats(userId: string): Promise<{
     return {
       totalEmails: 0,
       categoryBreakdown: {},
-      recentActivity: []
+      recentActivity: [],
+      pendingReplies: 0,
+      urgencyBreakdown: { high: 0, medium: 0, low: 0 }
     };
   }
 }
@@ -359,5 +422,48 @@ export async function getCategoryCounts(userId: string): Promise<{ [category: st
   } catch (error) {
     console.error('Error fetching category counts:', error);
     return {};
+  }
+}
+
+/**
+ * Get reply counts for Chrome extension display
+ */
+export async function getReplyCounts(userId: string): Promise<{
+  totalReplies: number;
+  highUrgency: number;
+  mediumUrgency: number;
+  lowUrgency: number;
+}> {
+  try {
+    const { data, error } = await supabase
+      .from('email_cache_simple')
+      .select('urgency')
+      .eq('user_id', userId)
+      .eq('needs_reply', true);
+
+    if (error) {
+      throw error;
+    }
+
+    const urgencyBreakdown = (data || []).reduce((acc, item) => {
+      acc[item.urgency] = (acc[item.urgency] || 0) + 1;
+      return acc;
+    }, { high: 0, medium: 0, low: 0 });
+
+    return {
+      totalReplies: data?.length || 0,
+      highUrgency: urgencyBreakdown.high,
+      mediumUrgency: urgencyBreakdown.medium,
+      lowUrgency: urgencyBreakdown.low
+    };
+
+  } catch (error) {
+    console.error('Error fetching reply counts:', error);
+    return {
+      totalReplies: 0,
+      highUrgency: 0,
+      mediumUrgency: 0,
+      lowUrgency: 0
+    };
   }
 }

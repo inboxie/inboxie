@@ -442,17 +442,28 @@ export async function POST(request: NextRequest) {
       await updateUserEmailCount(user.id, savedResults.length);
     }
 
-    // Calculate category breakdown
+    // Calculate category breakdown and reply stats
     const categoryBreakdown = savedResults.reduce((acc, result) => {
       acc[result.category] = (acc[result.category] || 0) + 1;
       return acc;
     }, {} as { [category: string]: number });
+
+    const replyStats = {
+      totalReplies: savedResults.filter(r => r.needsReply).length,
+      urgencyBreakdown: savedResults
+        .filter(r => r.needsReply)
+        .reduce((acc, result) => {
+          acc[result.urgency] = (acc[result.urgency] || 0) + 1;
+          return acc;
+        }, { high: 0, medium: 0, low: 0 })
+    };
 
     const totalTime = Math.round(performance.now() - startTime);
     
     console.log(`✅ OPTIMIZATION COMPLETE: ${savedResults.length} emails processed in ${totalTime}ms`);
     console.log(`📊 Performance breakdown - Fetch: ${fetchTime}ms, AI: ${aiTime}ms, Labels: ${labelTime}ms, Save: ${saveTime}ms`);
     console.log(`🏷️ Categories: ${Object.entries(categoryBreakdown).map(([cat, count]) => `${cat}:${count}`).join(', ')}`);
+    console.log(`💬 Replies: ${replyStats.totalReplies} total (${replyStats.urgencyBreakdown.high} high, ${replyStats.urgencyBreakdown.medium} medium, ${replyStats.urgencyBreakdown.low} low)`);
 
     return NextResponse.json({
       success: true,
@@ -461,6 +472,7 @@ export async function POST(request: NextRequest) {
         processed: savedResults.length,
         failed: processedMetadata.length - savedResults.length,
         categories: categoryBreakdown,
+        replies: replyStats,
         labels: {
           applied: labelResults.applied,
           failed: labelResults.failed,
@@ -474,7 +486,7 @@ export async function POST(request: NextRequest) {
           saveMs: saveTime,
           emailsPerSecond: Math.round((savedResults.length * 1000) / totalTime)
         },
-        privacyNote: "Zero email content stored - optimized in-memory processing with Gmail labeling",
+        privacyNote: "Zero email content stored - optimized in-memory processing with Gmail labeling + reply analysis",
         user: {
           planType: limits.planType,
           emailsProcessed: limits.emailsProcessed + savedResults.length,
