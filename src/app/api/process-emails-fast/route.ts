@@ -1,8 +1,8 @@
-// src/app/api/process-emails-fast/route.ts - Optimized with Parallel Processing
+// src/app/api/process-emails-fast/route.ts - Optimized with Parallel Processing + Gmail Labeling
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../auth/[...nextauth]/route';
-import { fetchLatestEmails } from '@/lib/gmail';
+import { fetchLatestEmails, createGmailLabel, applyLabelToEmail, getGmailLabels } from '@/lib/gmail';
 import { processEmailsInMemory } from '@/lib/openai';
 import { 
   getOrCreateUser, 
@@ -21,7 +21,8 @@ const PERFORMANCE_CONFIG = {
   FETCH_BATCH_SIZE: 20,           // 20 emails per fetch batch
   AI_PROCESSING_CHUNK_SIZE: 8,    // Process 8 emails per AI chunk
   MAX_PARALLEL_AI_CHUNKS: 3,      // Max 3 AI chunks running simultaneously
-  DB_SAVE_CHUNK_SIZE: 10          // Save 10 records per DB chunk
+  DB_SAVE_CHUNK_SIZE: 10,         // Save 10 records per DB chunk
+  LABEL_BATCH_SIZE: 10            // Apply 10 labels per batch
 };
 
 // Helper function to get user email from either NextAuth session OR extension JWT
@@ -184,6 +185,108 @@ async function processEmailsParallel(emails: any[]): Promise<any[]> {
   return results;
 }
 
+// NEW: Apply Gmail labels in parallel
+async function applyGmailLabelsParallel(
+  accessToken: string, 
+  processedMetadata: any[]
+): Promise<{ applied: number; failed: number; labelIds: { [category: string]: string } }> {
+  const { LABEL_BATCH_SIZE } = PERFORMANCE_CONFIG;
+  
+  console.log(`🏷️ PARALLEL LABELS: Applying labels to ${processedMetadata.length} emails`);
+
+  try {
+    // Get existing labels first
+    const existingLabels = await getGmailLabels(accessToken);
+    const labelMap = new Map(existingLabels.map(label => [label.name.toLowerCase(), label.id]));
+    console.log(`📋 Found ${existingLabels.length} existing Gmail labels`);
+    
+    // Create missing labels for each category
+    const categories = [...new Set(processedMetadata.map(m => m.category))];
+    const labelIds: { [category: string]: string } = {};
+    
+    console.log(`🎯 Categories to process: ${categories.join(', ')}`);
+    
+    for (const category of categories) {
+      const labelName = `Inboxie/${category}`;
+      let labelId = labelMap.get(labelName.toLowerCase());
+      
+      if (!labelId) {
+        console.log(`🆕 Creating new label: ${labelName}`);
+        labelId = await createGmailLabel(accessToken, labelName, category.toLowerCase());
+        
+        if (labelId) {
+          labelMap.set(labelName.toLowerCase(), labelId);
+          console.log(`✅ Created label ${labelName} with ID: ${labelId}`);
+        } else {
+          console.error(`❌ Failed to create label: ${labelName}`);
+          continue;
+        }
+      } else {
+        console.log(`✅ Using existing label: ${labelName} (${labelId})`);
+      }
+      
+      labelIds[category] = labelId;
+    }
+    
+    // Apply labels in batches
+    const batches = [];
+    for (let i = 0; i < processedMetadata.length; i += LABEL_BATCH_SIZE) {
+      batches.push(processedMetadata.slice(i, i + LABEL_BATCH_SIZE));
+    }
+    
+    console.log(`📦 Processing ${batches.length} label batches of ${LABEL_BATCH_SIZE} emails each`);
+    
+    let applied = 0;
+    let failed = 0;
+    
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const batch = batches[batchIndex];
+      const batchStartTime = performance.now();
+      
+      // Apply labels in parallel within each batch
+      const labelPromises = batch.map(async (metadata) => {
+        try {
+          const labelId = labelIds[metadata.category];
+          
+          if (!labelId) {
+            console.warn(`⚠️ No label ID found for category: ${metadata.category}`);
+            return { success: false, emailId: metadata.id };
+          }
+          
+          await applyLabelToEmail(accessToken, metadata.id, labelId);
+          return { success: true, emailId: metadata.id };
+          
+        } catch (error) {
+          console.error(`❌ Failed to apply label to email ${metadata.id}:`, error.message);
+          return { success: false, emailId: metadata.id };
+        }
+      });
+      
+      const batchResults = await Promise.all(labelPromises);
+      const batchApplied = batchResults.filter(r => r.success).length;
+      const batchFailed = batchResults.filter(r => !r.success).length;
+      
+      applied += batchApplied;
+      failed += batchFailed;
+      
+      const batchTime = Math.round(performance.now() - batchStartTime);
+      console.log(`   📊 Batch ${batchIndex + 1}/${batches.length}: ${batchApplied} applied, ${batchFailed} failed (${batchTime}ms)`);
+      
+      // Small delay between batches to respect rate limits
+      if (batchIndex < batches.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 150));
+      }
+    }
+    
+    console.log(`✅ LABELS APPLIED: ${applied} success, ${failed} failed`);
+    return { applied, failed, labelIds };
+    
+  } catch (error) {
+    console.error(`❌ Error in parallel Gmail labeling:`, error);
+    return { applied: 0, failed: processedMetadata.length, labelIds: {} };
+  }
+}
+
 // Parallel database saves
 async function saveMetadataParallel(
   processedMetadata: any[], 
@@ -239,7 +342,7 @@ export async function POST(request: NextRequest) {
   const startTime = performance.now();
   
   try {
-    console.log('⚡ OPTIMIZED PROCESSING: Starting high-performance email processing...');
+    console.log('⚡ OPTIMIZED PROCESSING: Starting high-performance email processing with Gmail labeling...');
 
     // Authentication
     const userEmail = await getUserEmail(request);
@@ -322,6 +425,13 @@ export async function POST(request: NextRequest) {
 
     console.log(`🗑️ Email content discarded. AI processing took ${aiTime}ms`);
 
+    // 🏷️ APPLY GMAIL LABELS
+    const labelStartTime = performance.now();
+    const labelResults = await applyGmailLabelsParallel(accessToken, processedMetadata);
+    const labelTime = Math.round(performance.now() - labelStartTime);
+
+    console.log(`🏷️ Gmail labeling complete: ${labelResults.applied} applied, ${labelResults.failed} failed (${labelTime}ms)`);
+
     // 💾 PARALLEL DATABASE SAVES
     const saveStartTime = performance.now();
     const savedResults = await saveMetadataParallel(processedMetadata, user.id);
@@ -341,24 +451,30 @@ export async function POST(request: NextRequest) {
     const totalTime = Math.round(performance.now() - startTime);
     
     console.log(`✅ OPTIMIZATION COMPLETE: ${savedResults.length} emails processed in ${totalTime}ms`);
-    console.log(`📊 Performance breakdown - Fetch: ${fetchTime}ms, AI: ${aiTime}ms, Save: ${saveTime}ms`);
+    console.log(`📊 Performance breakdown - Fetch: ${fetchTime}ms, AI: ${aiTime}ms, Labels: ${labelTime}ms, Save: ${saveTime}ms`);
     console.log(`🏷️ Categories: ${Object.entries(categoryBreakdown).map(([cat, count]) => `${cat}:${count}`).join(', ')}`);
 
     return NextResponse.json({
       success: true,
-      message: `High-performance processing: ${savedResults.length} emails in ${totalTime}ms`,
+      message: `High-performance processing: ${savedResults.length} emails organized and labeled in ${totalTime}ms`,
       data: {
         processed: savedResults.length,
         failed: processedMetadata.length - savedResults.length,
         categories: categoryBreakdown,
+        labels: {
+          applied: labelResults.applied,
+          failed: labelResults.failed,
+          labelIds: labelResults.labelIds
+        },
         performance: {
           totalMs: totalTime,
           fetchMs: fetchTime,
           aiMs: aiTime,
+          labelMs: labelTime,
           saveMs: saveTime,
           emailsPerSecond: Math.round((savedResults.length * 1000) / totalTime)
         },
-        privacyNote: "Zero email content stored - optimized in-memory processing",
+        privacyNote: "Zero email content stored - optimized in-memory processing with Gmail labeling",
         user: {
           planType: limits.planType,
           emailsProcessed: limits.emailsProcessed + savedResults.length,
