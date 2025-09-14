@@ -1,8 +1,8 @@
-// src/app/api/get-user-stats/route.ts
+// src/app/api/get-user-stats/route.ts - Updated for email_cache_simple table with CORS
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../auth/[...nextauth]/route';
-import { getOrCreateUser, checkUserLimits, detectPendingReplies} from '@/lib/supabase';
+import { getOrCreateUser, checkUserLimits, getCategoryCounts } from '@/lib/supabase';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 
@@ -12,6 +12,14 @@ const supabase = createClient(
 );
 
 const JWT_SECRET = process.env.NEXTAUTH_SECRET || 'your-fallback-secret';
+
+// CORS headers for extension requests
+const corsHeaders = {
+  'Access-Control-Allow-Origin': 'https://mail.google.com',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Google-Token',
+  'Access-Control-Allow-Credentials': 'true'
+};
 
 // Helper function to get user email from either NextAuth session OR extension JWT
 async function getUserEmail(request: NextRequest): Promise<string | null> {
@@ -41,6 +49,13 @@ async function getUserEmail(request: NextRequest): Promise<string | null> {
   return null;
 }
 
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, {
+    status: 200,
+    headers: corsHeaders
+  });
+}
+
 export async function GET(request: NextRequest) {
   try {
     // Get user email from either NextAuth session or extension JWT
@@ -50,7 +65,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         success: false,
         error: 'Authentication required'
-      }, { status: 401 });
+      }, { status: 401, headers: corsHeaders });
     }
 
     console.log('📊 Getting user stats for:', userEmail);
@@ -61,76 +76,33 @@ export async function GET(request: NextRequest) {
     // Get user limits
     const limits = await checkUserLimits(user.id);
 
-    // Get folder counts by category
-    const { data: categoryData, error } = await supabase
-      .from('email_cache')
-      .select('ai_category')
-      .eq('user_id', user.id);
+    // Get category counts from email_cache_simple table (privacy-first)
+    const categoryCounts = await getCategoryCounts(user.id);
 
-    if (error) {
-      console.error('Error fetching category data:', error);
-    }
+    // Get total organized emails count
+    const totalOrganizedEmails = Object.values(categoryCounts).reduce((sum, count) => sum + count, 0);
 
-    // Count emails by category
-    const folderCounts = (categoryData || []).reduce((acc, item) => {
-      const category = item.ai_category || 'Other';
-      acc[category] = (acc[category] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    // 🚀 NEW: Get AI replies count
-    const { data: aiRepliesData, error: aiError } = await supabase
-      .from('email_cache')
-      .select('id')
-      .eq('user_id', user.id)
-      .not('ai_replied_at', 'is', null); // Count emails where ai_replied_at is NOT null
-
-    const aiRepliesCount = aiRepliesData?.length || 0;
-    console.log(`🤖 AI Replies count: ${aiRepliesCount}`);
-
-    if (aiError) {
-      console.error('Error fetching AI replies count:', aiError);
-    }
-
-    // Get recent emails for inbox view - HIGHER LIMITS FOR PAID USERS
-    const emailDisplayLimit = limits.planType === 'paid' ? 500 : 50;
-    console.log(`📧 Fetching ${emailDisplayLimit} emails for ${limits.planType} user`);
-    
-    const { data: recentEmails, error: emailError } = await supabase
-      .from('email_cache')
-      .select('*')
+    // Get recent activity from email_cache_simple table
+    const { data: recentActivity, error: activityError } = await supabase
+      .from('email_cache_simple')
+      .select('ai_category, date_iso, created_at')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
-      .limit(emailDisplayLimit);
+      .limit(50);
 
-    if (emailError) {
-      console.error('Error fetching recent emails:', emailError);
+    if (activityError) {
+      console.error('Error fetching recent activity:', activityError);
     }
 
-    // Transform emails for frontend
-    const transformedEmails = (recentEmails || []).map(email => ({
-      id: email.id,
-      subject: email.subject,
-      from: email.from_addr,
-      snippet: email.subject,
-      category: email.ai_category,
-      aiReason: email.ai_reason,
-      processed_at: email.created_at,
-      date: email.date_iso || email.created_at
+    // Transform for frontend (minimal data, no email content)
+    const recentOrganizedEmails = (recentActivity || []).slice(0, 20).map(item => ({
+      id: `org_${Math.random().toString(36).substr(2, 9)}`, // Generate temp ID for display
+      category: item.ai_category,
+      date: item.date_iso || item.created_at,
+      organized_at: item.created_at
     }));
 
-    // Get pending replies
-    const pendingReplies = await detectPendingReplies(user.id);
-
-    // Get total email count from Gmail (if needed for Sent/Archive/Trash)
-    // For now, we'll use placeholders for non-processed folders
-    const gmailFolderCounts = {
-      Sent: 0, // Could fetch from Gmail API if needed
-      Archive: 0, // Could fetch from Gmail API if needed  
-      Trash: 0 // Could fetch from Gmail API if needed
-    };
-
-    console.log(`✅ Returning ${transformedEmails.length} emails for display`);
+    console.log(`✅ Returning stats for ${totalOrganizedEmails} organized emails`);
 
     return NextResponse.json({
       success: true,
@@ -144,23 +116,26 @@ export async function GET(request: NextRequest) {
           remaining: limits.limit - limits.emailsProcessed
         },
         folderCounts: {
-          Inbox: transformedEmails.length, // Total emails processed
-          Work: folderCounts.Work || 0,
-          Newsletter: folderCounts.Newsletter || 0,
-          Personal: folderCounts.Personal || 0,
-          Other: folderCounts.Other || 0,
-          Sent: gmailFolderCounts.Sent,
-          Archive: gmailFolderCounts.Archive,
-          Trash: gmailFolderCounts.Trash,
-          ...folderCounts // Include any other categories
+          // Use category counts from email_cache_simple (privacy-first)
+          Work: categoryCounts.Work || 0,
+          Personal: categoryCounts.Personal || 0,
+          Newsletter: categoryCounts.Newsletter || 0,
+          Shopping: categoryCounts.Shopping || 0,
+          Support: categoryCounts.Support || 0,
+          Other: categoryCounts.Other || 0,
+          // Add total count
+          Total: totalOrganizedEmails,
+          // Placeholder for Gmail folders (not implemented in privacy-first approach)
+          Sent: 0,
+          Archive: 0,
+          Trash: 0
         },
-        recentEmails: transformedEmails,
-        pendingReplies: pendingReplies,
-        totalEmails: transformedEmails.length,
-        // 🚀 NEW: Include AI replies count
-        aiRepliesCount: aiRepliesCount
+        recentEmails: recentOrganizedEmails,
+        totalEmails: totalOrganizedEmails,
+        // Privacy note
+        privacyNote: "Only organization metadata stored - no email content"
       }
-    });
+    }, { headers: corsHeaders });
 
   } catch (error) {
     console.error('Error getting user stats:', error);
@@ -169,7 +144,7 @@ export async function GET(request: NextRequest) {
       success: false,
       error: 'Failed to get user stats',
       message: error instanceof Error ? error.message : 'Unknown error occurred'
-    }, { status: 500 });
+    }, { status: 500, headers: corsHeaders });
   }
 }
 
@@ -181,7 +156,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         success: false,
         error: 'User email is required'
-      }, { status: 400 });
+      }, { status: 400, headers: corsHeaders });
     }
 
     console.log(`📊 Fetching user stats for: ${userEmail}`);
@@ -198,13 +173,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       data: {
-        planType: limits.planType, // This will show 'paid' in alpha mode
+        planType: limits.planType,
         emailsProcessed: limits.emailsProcessed,
         limit: limits.limit,
         remaining: limits.limit - limits.emailsProcessed,
         canProcess: limits.canProcess
       }
-    });
+    }, { headers: corsHeaders });
 
   } catch (error) {
     console.error('❌ Error fetching user stats:', error);
@@ -212,6 +187,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: false,
       error: 'Failed to fetch user stats'
-    }, { status: 500 });
+    }, { status: 500, headers: corsHeaders });
   }
 }

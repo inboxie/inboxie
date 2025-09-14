@@ -34,8 +34,8 @@ async function handleAuthentication(apiBaseUrl) {
     // Exchange Google token for backend JWT
     const backendToken = await exchangeTokenWithBackend(googleToken, apiBaseUrl);
     
-    // Store the backend JWT token
-    await storeToken(backendToken);
+    // Store BOTH tokens
+    await storeTokens(backendToken, googleToken);
     
     console.log('Background: Authentication successful!');
     return backendToken;
@@ -115,17 +115,19 @@ async function validateToken(token, apiBaseUrl) {
 }
 
 /**
- * Store JWT token in Chrome storage
+ * Store both JWT and Google tokens in Chrome storage
  */
-async function storeToken(token) {
+async function storeTokens(jwtToken, googleToken) {
   return new Promise((resolve, reject) => {
     chrome.storage.local.set({
-      'inboxie_jwt_token': token,
+      'inboxie_jwt_token': jwtToken,
+      'inboxie_google_token': googleToken,
       'inboxie_auth_timestamp': Date.now()
     }, () => {
       if (chrome.runtime.lastError) {
         reject(chrome.runtime.lastError);
       } else {
+        console.log('Background: Stored both JWT and Google tokens');
         resolve();
       }
     });

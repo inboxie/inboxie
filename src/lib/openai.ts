@@ -1,22 +1,31 @@
-// src/lib/openai.ts
+// src/lib/openai.ts - In-Memory Processing (Privacy-First)
 import OpenAI from 'openai';
-import { EmailData, CategoryResult, ToneProfile, CustomCategory } from '@/types';
 import { APP_CONFIG } from '@/config/app';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
 
+export interface EmailData {
+  id: string;
+  subject: string;
+  from: string;
+  body: string;
+  snippet: string;
+  date: string;
+  threadId?: string;
+}
+
 /**
- * Feature 1: Categorize email using predefined categories (Free users)
- * UPDATED: Removed aggressive pre-filtering, rely on better AI prompts
+ * Categorize email using full content for accuracy (in-memory only)
+ * Content is processed and immediately discarded - never stored
  */
-export async function categorizeEmailBasic(email: EmailData): Promise<CategoryResult> {
+export async function categorizeEmailBasic(email: EmailData): Promise<string> {
   try {
-    const categories = APP_CONFIG.defaultCategories.join(', ');
+    const categoryList = APP_CONFIG.defaultCategories.join(', ');
     
     const prompt = `
-Categorize this email. Choose exactly ONE category from: ${categories}
+Categorize this email. Choose exactly ONE category from: ${categoryList}
 
 From: ${email.from}
 Subject: ${email.subject}
@@ -67,19 +76,14 @@ OTHER: Everything else:
 
 IMPORTANT: Account notifications from financial services (banks, trading platforms, pensions) are PERSONAL, not newsletters. These are important personal account communications, not marketing.
 
-Respond in JSON:
-{
-  "category": "category_name",
-  "confidence": 0.95,
-  "reason": "Brief explanation"
-}`;
+Respond with just the category name: Work, Personal, Newsletter, Shopping, Support, or Other`;
 
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
         {
           role: 'system',
-          content: 'You are an expert email categorization assistant. Be precise and conservative with Work categorization. Most company emails should be Newsletter unless they involve direct business collaboration. Always respond with valid JSON.'
+          content: 'You are an expert email categorization assistant. Be precise and conservative with Work categorization. Most company emails should be Newsletter unless they involve direct business collaboration. Respond with just the category name.'
         },
         {
           role: 'user',
@@ -87,460 +91,159 @@ Respond in JSON:
         }
       ],
       temperature: 0.1, // Low temperature for consistent categorization
-      max_tokens: 200,
+      max_tokens: 10, // Just need the category name
     });
 
-    const content = response.choices[0]?.message?.content;
-    if (!content) {
-      throw new Error('No response from OpenAI');
-    }
-
-    // Clean the response - remove markdown code blocks if present
-    const cleanContent = content
-      .replace(/```json\s*/g, '')
-      .replace(/```\s*/g, '')
-      .trim();
-
-    const result = JSON.parse(cleanContent);
+    const category = response.choices[0]?.message?.content?.trim();
     
-    // Validate the category is in our allowed list
-    if (!APP_CONFIG.defaultCategories.includes(result.category)) {
-      console.warn(`Invalid category "${result.category}", defaulting to "Other"`);
-      result.category = 'Other';
+    if (!category) {
+      console.warn('No category returned from OpenAI, defaulting to Other');
+      return 'Other';
     }
 
-    return {
-      category: result.category,
-      confidence: result.confidence || 0.8,
-      reason: result.reason || 'Categorized by AI',
-    };
+    // Validate the category is in our allowed list
+    if (!APP_CONFIG.defaultCategories.includes(category)) {
+      console.warn(`Invalid category "${category}", defaulting to "Other"`);
+      return 'Other';
+    }
+
+    console.log(`Categorized email "${email.subject}" as: ${category}`);
+    return category;
 
   } catch (error) {
     console.error('Error categorizing email:', error);
-    return {
+    return 'Other';
+  }
+}
+
+/**
+ * Batch categorize multiple emails for efficiency (in-memory processing)
+ * All email content is processed and immediately discarded
+ */
+export async function categorizeEmailsBatch(emailsList: EmailData[]): Promise<string[]> {
+  try {
+    if (emailsList.length === 0) return [];
+    
+    // For small batches, categorize individually for better accuracy
+    if (emailsList.length <= 3) {
+      console.log(`Processing ${emailsList.length} emails individually for accuracy`);
+      const results = await Promise.all(
+        emailsList.map(email => categorizeEmailBasic(email))
+      );
+      return results;
+    }
+
+    // For larger batches, use batch processing
+    console.log(`Batch processing ${emailsList.length} emails`);
+    const categoryOptions = APP_CONFIG.defaultCategories.join(', ');
+    
+    const emailsText = emailsList.map((email, index) => 
+      `${index + 1}. From: ${email.from}
+   Subject: ${email.subject}
+   Content: ${email.body.substring(0, 500)}`
+    ).join('\n\n');
+
+    const prompt = `
+Categorize these ${emailsList.length} emails. For each email, choose exactly ONE category from: ${categoryOptions}
+
+${emailsText}
+
+CATEGORIES: Work, Personal, Newsletter, Shopping, Support, Other
+
+Use the same categorization rules as before. Respond with just the category names, one per line, numbered:
+1. [Category]
+2. [Category]
+3. [Category]
+...`;
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are an expert email categorization assistant. Respond with just category names, one per line, numbered to match the input emails.'
+        },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      temperature: 0.1,
+      max_tokens: emailsList.length * 5, // ~5 tokens per category line
+    });
+
+    const content = response.choices[0]?.message?.content?.trim();
+    
+    if (!content) {
+      console.warn('No response from batch categorization, using individual fallback');
+      return Promise.all(emailsList.map(email => categorizeEmailBasic(email)));
+    }
+
+    // Parse the numbered response
+    const lines = content.split('\n');
+    const responseCategories = lines
+      .map(line => {
+        // Extract category from "1. Category" format
+        const match = line.match(/^\d+\.\s*(.+)$/);
+        return match ? match[1].trim() : line.trim();
+      })
+      .filter(cat => APP_CONFIG.defaultCategories.includes(cat))
+      .slice(0, emailsList.length); // Ensure we don't get more than we asked for
+
+    // Fill any missing categories with 'Other'
+    while (responseCategories.length < emailsList.length) {
+      responseCategories.push('Other');
+    }
+
+    console.log(`Batch categorization complete: ${responseCategories.length} emails processed`);
+    return responseCategories;
+
+  } catch (error) {
+    console.error('Error in batch categorization:', error);
+    // Fallback to individual categorization
+    console.log('Falling back to individual categorization');
+    return Promise.all(emailsList.map(email => categorizeEmailBasic(email)));
+  }
+}
+
+/**
+ * Process emails and return only metadata (content discarded immediately)
+ * This function demonstrates the in-memory processing approach
+ */
+export async function processEmailsInMemory(emails: EmailData[]): Promise<Array<{
+  id: string;
+  category: string;
+  date: string;
+  threadId: string;
+}>> {
+  try {
+    console.log(`Processing ${emails.length} emails in memory (content will be discarded)`);
+    
+    // Categorize emails using full content
+    const emailCategories = await categorizeEmailsBatch(emails);
+    
+    // Extract only metadata, discard content
+    const results = emails.map((email, index) => ({
+      id: email.id,
+      category: emailCategories[index] || 'Other',
+      date: email.date,
+      threadId: email.threadId || email.id
+    }));
+    
+    // At this point, email content is out of scope and will be garbage collected
+    console.log(`In-memory processing complete. Content discarded, returning ${results.length} metadata records`);
+    
+    return results;
+    
+  } catch (error) {
+    console.error('Error in in-memory email processing:', error);
+    
+    // Return basic metadata even on error
+    return emails.map(email => ({
+      id: email.id,
       category: 'Other',
-      confidence: 0.5,
-      reason: 'Error in categorization',
-    };
-  }
-}
-
-/**
- * Feature 1: Categorize email using custom categories (Paid users)
- */
-export async function categorizeEmailCustom(
-  email: EmailData, 
-  customCategories: CustomCategory[]
-): Promise<CategoryResult> {
-  try {
-    const categoryList = customCategories.map(cat => 
-      `${cat.name}: ${cat.description || ''}`
-    ).join('\n');
-    
-    const categoryNames = customCategories.map(cat => cat.name).join(', ');
-
-    const prompt = `
-Analyze this email and categorize it using these CUSTOM categories:
-
-${categoryList}
-
-Email Details:
-From: ${email.from}
-Subject: ${email.subject}
-Content: ${email.body.substring(0, 1000)}
-
-You must choose ONE category from: ${categoryNames}
-
-IMPORTANT: 
-- Be DETERMINISTIC - same email should always get same category
-- Consider the category descriptions carefully
-- If no custom category fits well, use the closest match
-
-Respond with JSON only:
-{
-  "category": "exact_category_name",
-  "confidence": 0.95,
-  "reason": "Brief explanation why this category fits"
-}`;
-
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are an expert email categorization assistant. Always respond with valid JSON. Use the user\'s custom categories precisely.'
-        },
-        {
-          role: 'user',
-          content: prompt
-        }
-      ],
-      temperature: 0.1,
-      max_tokens: 200,
-    });
-
-    const content = response.choices[0]?.message?.content;
-    if (!content) {
-      throw new Error('No response from OpenAI');
-    }
-
-    // Clean the response - remove markdown code blocks if present
-    const cleanContent = content
-      .replace(/```json\s*/g, '')
-      .replace(/```\s*/g, '')
-      .trim();
-
-    const result = JSON.parse(cleanContent);
-    
-    // Validate category exists in custom list
-    const validCategory = customCategories.find(cat => cat.name === result.category);
-    if (!validCategory) {
-      result.category = customCategories[0]?.name || 'Other';
-    }
-
-    return {
-      category: result.category,
-      confidence: result.confidence || 0.8,
-      reason: result.reason || 'Categorized by AI',
-    };
-
-  } catch (error) {
-    console.error('Error categorizing email with custom categories:', error);
-    return {
-      category: customCategories[0]?.name || 'Other',
-      confidence: 0.5,
-      reason: 'Error in categorization',
-    };
-  }
-}
-
-/**
- * Feature 2: Analyze if email needs a reply (Background processing)
- */
-export async function analyzeEmailForReply(email: any): Promise<{
-  needsReply: boolean;
-  reason: string;
-  urgency: 'low' | 'medium' | 'high';
-}> {
-  try {
-    // Quick pre-filtering for obvious non-reply emails
-    const skipCategories = ['newsletter', 'marketing', 'other'];
-    if (skipCategories.includes(email.ai_category?.toLowerCase())) {
-      return { needsReply: false, reason: 'Newsletter/marketing email', urgency: 'low' };
-    }
-
-    if (!email.from_addr || 
-        email.from_addr.includes('no-reply') || 
-        email.from_addr.includes('noreply') ||
-        email.from_addr.includes('donotreply')) {
-      return { needsReply: false, reason: 'No-reply sender', urgency: 'low' };
-    }
-
-    // Check if email is recent (within 14 days)
-    const emailDate = new Date(email.date_iso || email.created_at);
-    const fourteenDaysAgo = new Date();
-    fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
-    if (emailDate < fourteenDaysAgo) {
-      return { needsReply: false, reason: 'Email too old', urgency: 'low' };
-    }
-
-    const prompt = `
-Analyze this email and determine if it requires a response from the recipient.
-
-From: ${email.from_addr}
-Subject: ${email.subject}
-Category: ${email.ai_category}
-Body: ${email.subject || ''}
-
-Consider:
-- Is the sender asking a question or requesting information?
-- Does it require action, confirmation, or feedback?
-- Is it a request for a meeting, call, or collaboration?
-- Does it express urgency or importance?
-- Is the sender expecting a response?
-
-IGNORE emails that are:
-- Just informational updates or FYIs
-- Automated confirmations or receipts
-- Marketing or promotional content
-- "Thank you" messages that don't require follow-up
-- Newsletter-style content
-
-Respond with JSON only:
-{
-  "needsReply": true/false,
-  "reason": "Brief explanation why it needs/doesn't need a reply",
-  "urgency": "low/medium/high"
-}`;
-
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are an expert email assistant that helps identify which emails need responses. Be precise and practical. Always respond with valid JSON.'
-        },
-        {
-          role: 'user',
-          content: prompt
-        }
-      ],
-      temperature: 0.1, // Low temperature for consistent results
-      max_tokens: 200,
-    });
-
-    const content = response.choices[0]?.message?.content;
-    if (!content) {
-      throw new Error('No response from OpenAI');
-    }
-
-    // Clean the response - remove markdown code blocks if present
-    const cleanContent = content
-      .replace(/```json\s*/g, '')
-      .replace(/```\s*/g, '')
-      .trim();
-
-    const result = JSON.parse(cleanContent);
-    
-    return {
-      needsReply: result.needsReply || false,
-      reason: result.reason || 'AI analysis completed',
-      urgency: result.urgency || 'low'
-    };
-
-  } catch (error) {
-    console.error(`Reply analysis failed for email ${email.id}:`, error);
-    return { needsReply: false, reason: 'Analysis error', urgency: 'low' };
-  }
-}
-
-/**
- * Feature 3: Analyze sent emails to build tone profile
- */
-export async function analyzeToneProfile(sentEmails: EmailData[]): Promise<ToneProfile> {
-  try {
-    console.log(`Analyzing tone from ${sentEmails.length} sent emails...`);
-
-    // Combine email content for analysis
-    const emailContent = sentEmails.map(email => 
-      `Subject: ${email.subject}\nContent: ${email.body.substring(0, 500)}`
-    ).join('\n\n---\n\n').substring(0, 8000);
-
-    const prompt = `
-Analyze these sent emails to understand the user's writing tone and style:
-
-${emailContent}
-
-Analyze for:
-1. Formality level (formal/casual/mixed)
-2. Typical length (brief/moderate/detailed)
-3. Writing style characteristics
-4. Common phrases or expressions used
-
-Respond with JSON only:
-{
-  "formality": "formal|casual|mixed",
-  "length": "brief|moderate|detailed", 
-  "style": ["characteristic1", "characteristic2", "characteristic3"],
-  "commonPhrases": ["phrase1", "phrase2", "phrase3"]
-}`;
-
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are an expert communication analyst. Analyze writing patterns and respond with valid JSON.'
-        },
-        {
-          role: 'user',
-          content: prompt
-        }
-      ],
-      temperature: 0.2,
-      max_tokens: 400,
-    });
-
-    const content = response.choices[0]?.message?.content;
-    if (!content) {
-      throw new Error('No response from OpenAI');
-    }
-
-    // Clean the response - remove markdown code blocks if present
-    const cleanContent = content
-      .replace(/```json\s*/, '')
-      .replace(/```\s*$/, '')
-      .trim();
-
-    const analysis = JSON.parse(cleanContent);
-
-    return {
-      userId: 'current_user',
-      sentEmailsAnalyzed: sentEmails.length,
-      toneCharacteristics: {
-        formality: analysis.formality || 'mixed',
-        length: analysis.length || 'moderate',
-        style: analysis.style || [],
-        commonPhrases: analysis.commonPhrases || [],
-      },
-      lastTraining: new Date().toISOString(),
-    };
-
-  } catch (error) {
-    console.error('Error analyzing tone profile:', error);
-    throw new Error('Failed to analyze tone profile');
-  }
-}
-
-/**
- * Feature 3: Generate AI response using learned tone
- */
-export async function generateTonedResponse(
-  originalEmail: EmailData,
-  toneProfile: ToneProfile,
-  includeQuoting: boolean = true
-): Promise<string> {
-  try {
-    const { formality, length, style, commonPhrases } = toneProfile.toneCharacteristics;
-
-    let quotedContent = '';
-    if (includeQuoting) {
-      quotedContent = `\n\nOn ${originalEmail.date}, ${originalEmail.from} wrote:\n> ${originalEmail.body.split('\n').join('\n> ')}`;
-    }
-
-    const prompt = `
-Generate a response to this email using the user's specific writing tone:
-
-Original Email:
-From: ${originalEmail.from}
-Subject: ${originalEmail.subject}
-Content: ${originalEmail.body.substring(0, 1000)}
-
-User's Writing Style:
-- Formality: ${formality}
-- Length: ${length}  
-- Style characteristics: ${style.join(', ')}
-- Common phrases: ${commonPhrases.join(', ')}
-
-Generate a response that:
-1. Matches the user's tone and style exactly
-2. Uses their typical formality level
-3. Matches their usual email length
-4. Incorporates their common phrases naturally
-5. Addresses the original email appropriately
-
-${includeQuoting ? 'Include the quoted original email at the end.' : ''}
-
-Response:`;
-
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are an expert email writer. Generate responses that perfectly match the user\'s established writing tone and style.'
-        },
-        {
-          role: 'user',
-          content: prompt
-        }
-      ],
-      temperature: 0.3,
-      max_tokens: 600,
-    });
-
-    const generatedResponse = response.choices[0]?.message?.content;
-    if (!generatedResponse) {
-      throw new Error('No response generated');
-    }
-
-    return includeQuoting ? generatedResponse + quotedContent : generatedResponse;
-
-  } catch (error) {
-    console.error('Error generating toned response:', error);
-    throw new Error('Failed to generate AI response');
-  }
-}
-
-/**
- * Feature 4: Generate embeddings for semantic search
- */
-export async function generateEmbedding(text: string): Promise<number[]> {
-  try {
-    const response = await openai.embeddings.create({
-      model: 'text-embedding-3-small',
-      input: text.substring(0, 8000),
-    });
-
-    return response.data[0].embedding;
-  } catch (error) {
-    console.error('Error generating embedding:', error);
-    throw new Error('Failed to generate embedding');
-  }
-}
-
-/**
- * Create inline quote reply format (Free Feature - No AI)
- */
-export function createInlineQuoteReply(
-  originalEmail: EmailData,
-  userResponse: string
-): string {
-  try {
-    console.log('Processing reply...');
-
-    const cleanReply = `${userResponse}
-
-Best regards`;
-
-    console.log('Processed reply');
-    return cleanReply;
-
-  } catch (error) {
-    console.error('Error processing reply:', error);
-    return userResponse;
-  }
-}
-
-/**
- * Restructure email content for better readability
- */
-export async function restructureEmailContent(content: string): Promise<string> {
-  try {
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'system',
-          content: `You are an email formatting assistant. Restructure email content for better readability while preserving all original meaning.
-
-Rules:
-1. Add proper line breaks and paragraph spacing
-2. Format numbered points clearly with line breaks
-3. Preserve all original text - don't summarize or change meaning
-4. Add line breaks before questions
-5. Separate different topics with appropriate spacing
-6. Keep the same tone and voice
-7. Don't add any new content or interpretation
-8. Remove excessive line breaks but maintain logical spacing
-9. Format any lists or bullet points clearly
-
-Return only the restructured text, nothing else.`
-        },
-        {
-          role: 'user',
-          content: `Please restructure this email content for better readability:\n\n${content}`
-        }
-      ],
-      max_tokens: 1500,
-      temperature: 0.1,
-    });
-
-    const restructuredContent = response.choices[0]?.message?.content?.trim();
-    return restructuredContent || content;
-
-  } catch (error) {
-    console.error('Error restructuring email content:', error);
-    return content;
+      date: email.date,
+      threadId: email.threadId || email.id
+    }));
   }
 }

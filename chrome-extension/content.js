@@ -13,7 +13,9 @@ let dashboardData = {
   importRemaining: 0,
   planType: 'free',
   isProcessing: false,
-  isAuthenticated: false
+  isAuthenticated: false,
+  categories: {},
+  lastProcessingTime: 0
 };
 
 // Wait for Gmail to fully load, then inject dashboard
@@ -33,13 +35,12 @@ async function fetchDashboardData() {
   try {
     console.log('Fetching dashboard data...');
     
-    // Make direct API call (no separate auth check)
+    // Make direct API call to get user stats
     const response = await auth.apiCall('/api/get-user-stats');
 
     if (response.ok) {
       const result = await response.json();
       console.log('Backend response:', result);
-      console.log('Backend data:', result.data);
       
       if (result.success && result.data) {
         const stats = result.data;
@@ -49,8 +50,10 @@ async function fetchDashboardData() {
           emailsLimit: stats.user?.limit || 500,
           importRemaining: stats.user?.remaining || 0,
           planType: stats.user?.planType || 'free',
-          isProcessing: stats.isProcessing || false,
-          isAuthenticated: true
+          isProcessing: false,
+          isAuthenticated: true,
+          categories: stats.folderCounts || {},
+          lastProcessingTime: dashboardData.lastProcessingTime
         };
         
         updateDashboardUI();
@@ -109,13 +112,69 @@ function updateDashboardUI() {
   }
   if (importSubtitle) {
     if (dashboardData.isProcessing) {
-      importSubtitle.textContent = `${dashboardData.emailsOrganized} of ${dashboardData.emailsLimit} emails processed`;
+      importSubtitle.textContent = `Processing emails with AI...`;
     } else if (dashboardData.importRemaining > 0) {
-      importSubtitle.textContent = 'Ready to import more from Gmail';
+      importSubtitle.textContent = 'Ready to organize more emails';
     } else {
-      importSubtitle.textContent = 'All available emails imported';
+      importSubtitle.textContent = 'All available emails organized';
     }
   }
+
+  // Update category breakdown
+  updateCategoryBreakdown();
+
+  // Update performance info if available
+  if (dashboardData.lastProcessingTime > 0) {
+    const performanceCard = document.querySelector('.performance-info .card-value');
+    if (performanceCard) {
+      performanceCard.textContent = `${dashboardData.lastProcessingTime}ms`;
+    }
+  }
+}
+
+// Update category breakdown display
+function updateCategoryBreakdown() {
+  const categoryContainer = document.querySelector('.category-breakdown .category-list');
+  if (!categoryContainer) return;
+
+  const categories = dashboardData.categories;
+  const totalEmails = Object.values(categories).reduce((sum, count) => sum + count, 0);
+
+  if (totalEmails === 0) {
+    categoryContainer.innerHTML = '<div class="no-categories">No emails organized yet</div>';
+    return;
+  }
+
+  // Sort categories by count (highest first)
+  const sortedCategories = Object.entries(categories)
+    .filter(([_, count]) => count > 0)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 6); // Show top 6 categories
+
+  const categoryIcons = {
+    'Work': '💼',
+    'Personal': '👤', 
+    'Newsletter': '📰',
+    'Shopping': '🛒',
+    'Support': '🎧',
+    'Other': '📂'
+  };
+
+  categoryContainer.innerHTML = sortedCategories
+    .map(([category, count]) => {
+      const percentage = Math.round((count / totalEmails) * 100);
+      const icon = categoryIcons[category] || '📁';
+      
+      return `
+        <div class="category-item">
+          <span class="category-icon">${icon}</span>
+          <span class="category-name">${category}</span>
+          <span class="category-count">${count}</span>
+          <span class="category-percentage">(${percentage}%)</span>
+        </div>
+      `;
+    })
+    .join('');
 }
 
 // Create and inject the dashboard
@@ -130,7 +189,7 @@ function injectDashboard() {
   dashboard.id = 'inboxie-dashboard';
   dashboard.innerHTML = `
     <div class="inboxie-header">
-      <h3>📧 Inboxie Dashboard</h3>
+      <h3>📧 Inboxie AI Organizer</h3>
       <button id="inboxie-toggle">−</button>
     </div>
     <div class="inboxie-cards" id="inboxie-cards">
@@ -144,11 +203,30 @@ function injectDashboard() {
       </div>
       
       <div class="inboxie-card import-status" data-action="import">
-        <div class="card-icon">📥</div>
+        <div class="card-icon">🤖</div>
         <div class="card-content">
-          <h4>Import Emails</h4>
+          <h4>AI Organize</h4>
           <div class="card-value">Click to Start</div>
-          <div class="card-subtitle">Organize your inbox</div>
+          <div class="card-subtitle">Organize your inbox with AI</div>
+        </div>
+      </div>
+
+      <div class="inboxie-card category-breakdown">
+        <div class="card-icon">🏷️</div>
+        <div class="card-content">
+          <h4>Email Categories</h4>
+          <div class="category-list">
+            <div class="no-categories">No emails organized yet</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inboxie-card performance-info" style="display: none;">
+        <div class="card-icon">⚡</div>
+        <div class="card-content">
+          <h4>Last Processing</h4>
+          <div class="card-value">--ms</div>
+          <div class="card-subtitle">High-performance AI processing</div>
         </div>
       </div>
 
@@ -157,7 +235,7 @@ function injectDashboard() {
         <div class="card-content">
           <h4>Sign In to Inboxie</h4>
           <div class="card-value">Click to Login</div>
-          <div class="card-subtitle">Connect your account to see real data</div>
+          <div class="card-subtitle">Connect to organize your emails</div>
         </div>
       </div>
 
@@ -166,7 +244,7 @@ function injectDashboard() {
         <div class="card-content">
           <h4>Sign Out</h4>
           <div class="card-value">Click to Logout</div>
-          <div class="card-subtitle">Clear authentication and sign out</div>
+          <div class="card-subtitle">Clear authentication</div>
         </div>
       </div>
     </div>
@@ -246,26 +324,57 @@ async function handleCardClick(action) {
   }
 }
 
-// Start import process
+// Start import process with optimized API
 async function startImport() {
   try {
     dashboardData.isProcessing = true;
     updateDashboardUI();
     
+    console.log('🚀 Starting optimized email processing...');
+    const startTime = performance.now();
+    
     const response = await auth.apiCall('/api/process-emails-fast', {
-      method: 'POST'
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        emailLimit: 50 // Process 50 emails at a time
+      })
     });
 
     if (response.ok) {
-      console.log('Import started successfully');
-      // Data will be updated via the regular polling
+      const result = await response.json();
+      console.log('Processing result:', result);
+      
+      if (result.success) {
+        const processingTime = Math.round(performance.now() - startTime);
+        dashboardData.lastProcessingTime = processingTime;
+        
+        // Show performance info card
+        const performanceCard = document.querySelector('.performance-info');
+        if (performanceCard) {
+          performanceCard.style.display = 'flex';
+        }
+        
+        console.log(`✅ Processed ${result.data.processed} emails in ${processingTime}ms`);
+        console.log('📊 Categories:', result.data.categories);
+        
+        // Refresh dashboard data to show new results
+        setTimeout(fetchDashboardData, 1000);
+      } else {
+        console.log('Processing failed:', result.error);
+        alert(`Processing failed: ${result.error}`);
+      }
     } else {
-      console.log('Import failed');
-      dashboardData.isProcessing = false;
-      updateDashboardUI();
+      const errorResult = await response.json();
+      console.log('Processing request failed:', errorResult);
+      alert(`Processing failed: ${errorResult.error || 'Unknown error'}`);
     }
   } catch (error) {
-    console.log('Import request failed:', error);
+    console.log('Processing request failed:', error);
+    alert(`Processing failed: ${error.message}`);
+  } finally {
     dashboardData.isProcessing = false;
     updateDashboardUI();
   }

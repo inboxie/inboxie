@@ -34,11 +34,7 @@
 │   │   │   │   └── validate
 │   │   │   ├── get-user-stats
 │   │   │   │   └── route.ts
-│   │   │   ├── process-emails
-│   │   │   │   └── route.ts
 │   │   │   ├── process-emails-fast
-│   │   │   │   └── route.ts
-│   │   │   ├── process-emails-stream
 │   │   │   │   └── route.ts
 │   │   │   ├── update-user-plan
 │   │   │   │   └── route.ts
@@ -65,4 +61,4 @@
 ├── tailwind.config.js
 └── tsconfig.json
 
-23 directories, 43 files
+21 directories, 41 files
