@@ -138,10 +138,10 @@ export async function analyzeEmailForReply(email: any): Promise<{
       return { needsReply: false, reason: 'No-reply sender', urgency: 'low' };
     }
 
-    // Check if email is recent (within 14 days)
+    // Check if email is recent (within 30 days)
     const emailDate = new Date(email.date);
     const fourteenDaysAgo = new Date();
-    fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+    fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 30);
     if (emailDate < fourteenDaysAgo) {
       return { needsReply: false, reason: 'Email too old', urgency: 'low' };
     }

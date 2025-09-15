@@ -1,4 +1,4 @@
-// src/app/api/process-emails-fast/route.ts - Optimized with Parallel Processing + Gmail Labeling + Reply Analysis
+// src/app/api/process-emails-fast/route.ts - Optimized with Parallel Processing + Gmail Labeling + Reply Analysis + Smart Inbox
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../auth/[...nextauth]/route';
@@ -79,7 +79,7 @@ async function fetchEmailsParallel(
   let foundEnoughEmails = false;
 
   // Fetch in waves to respect rate limits
-  while (!foundEnoughEmails && currentOffset < totalLimit * 2) {
+  while (!foundEnoughEmails && currentOffset < totalLimit * 10) {
     // Create parallel fetch promises for this wave
     const fetchPromises = [];
     for (let i = 0; i < PARALLEL_FETCH_BATCHES; i++) {
@@ -185,7 +185,7 @@ async function processEmailsParallel(emails: any[]): Promise<any[]> {
   return results;
 }
 
-// NEW: Apply Gmail labels in parallel
+// NEW: Apply Gmail labels in parallel + Smart Inbox
 async function applyGmailLabelsParallel(
   accessToken: string, 
   processedMetadata: any[]
@@ -200,7 +200,7 @@ async function applyGmailLabelsParallel(
     const labelMap = new Map(existingLabels.map(label => [label.name.toLowerCase(), label.id]));
     console.log(`📋 Found ${existingLabels.length} existing Gmail labels`);
     
-    // Create missing labels for each category
+    // 1. Create category labels
     const categories = [...new Set(processedMetadata.map(m => m.category))];
     const labelIds: { [category: string]: string } = {};
     
@@ -228,7 +228,28 @@ async function applyGmailLabelsParallel(
       labelIds[category] = labelId;
     }
     
-    // Apply labels in batches
+    // 2. Create Smart Inbox label for emails needing replies
+    const smartInboxName = '☘️ Smart Inbox';
+    let smartInboxLabelId = labelMap.get(smartInboxName.toLowerCase());
+    
+    if (!smartInboxLabelId) {
+      console.log(`🤖 Creating Smart Inbox label: ${smartInboxName}`);
+      smartInboxLabelId = await createGmailLabel(accessToken, smartInboxName, 'smart-inbox');
+      
+      if (smartInboxLabelId) {
+        labelMap.set(smartInboxName.toLowerCase(), smartInboxLabelId);
+        console.log(`✅ Created Smart Inbox label with ID: ${smartInboxLabelId}`);
+      } else {
+        console.error(`❌ Failed to create Smart Inbox label`);
+      }
+    } else {
+      console.log(`✅ Using existing Smart Inbox label (${smartInboxLabelId})`);
+    }
+    
+    // Store smart inbox label ID for use
+    labelIds['SmartInbox'] = smartInboxLabelId || '';
+    
+    // 3. Apply labels in batches
     const batches = [];
     for (let i = 0; i < processedMetadata.length; i += LABEL_BATCH_SIZE) {
       batches.push(processedMetadata.slice(i, i + LABEL_BATCH_SIZE));
@@ -238,6 +259,7 @@ async function applyGmailLabelsParallel(
     
     let applied = 0;
     let failed = 0;
+    let smartInboxApplied = 0;
     
     for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
       const batch = batches[batchIndex];
@@ -246,31 +268,45 @@ async function applyGmailLabelsParallel(
       // Apply labels in parallel within each batch
       const labelPromises = batch.map(async (metadata) => {
         try {
-          const labelId = labelIds[metadata.category];
+          const results = { category: false, smartInbox: false };
           
-          if (!labelId) {
-            console.warn(`⚠️ No label ID found for category: ${metadata.category}`);
-            return { success: false, emailId: metadata.id };
+          // Apply category label
+          const categoryLabelId = labelIds[metadata.category];
+          if (categoryLabelId) {
+            await applyLabelToEmail(accessToken, metadata.id, categoryLabelId);
+            results.category = true;
           }
           
-          await applyLabelToEmail(accessToken, metadata.id, labelId);
-          return { success: true, emailId: metadata.id };
+          // Apply Smart Inbox label if email needs reply
+          if (metadata.needsReply && smartInboxLabelId) {
+            await applyLabelToEmail(accessToken, metadata.id, smartInboxLabelId);
+            results.smartInbox = true;
+            console.log(`🤖 Added to Smart Inbox: ${metadata.id} (${metadata.urgency} priority)`);
+          }
+          
+          return { 
+            success: results.category, 
+            emailId: metadata.id, 
+            addedToSmartInbox: results.smartInbox 
+          };
           
         } catch (error) {
-          console.error(`❌ Failed to apply label to email ${metadata.id}:`, error.message);
-          return { success: false, emailId: metadata.id };
+          console.error(`❌ Failed to apply labels to email ${metadata.id}:`, error.message);
+          return { success: false, emailId: metadata.id, addedToSmartInbox: false };
         }
       });
       
       const batchResults = await Promise.all(labelPromises);
       const batchApplied = batchResults.filter(r => r.success).length;
       const batchFailed = batchResults.filter(r => !r.success).length;
+      const batchSmartInbox = batchResults.filter(r => r.addedToSmartInbox).length;
       
       applied += batchApplied;
       failed += batchFailed;
+      smartInboxApplied += batchSmartInbox;
       
       const batchTime = Math.round(performance.now() - batchStartTime);
-      console.log(`   📊 Batch ${batchIndex + 1}/${batches.length}: ${batchApplied} applied, ${batchFailed} failed (${batchTime}ms)`);
+      console.log(`   📊 Batch ${batchIndex + 1}/${batches.length}: ${batchApplied} labeled, ${batchSmartInbox} to Smart Inbox, ${batchFailed} failed (${batchTime}ms)`);
       
       // Small delay between batches to respect rate limits
       if (batchIndex < batches.length - 1) {
@@ -278,7 +314,7 @@ async function applyGmailLabelsParallel(
       }
     }
     
-    console.log(`✅ LABELS APPLIED: ${applied} success, ${failed} failed`);
+    console.log(`✅ LABELS APPLIED: ${applied} category labels, ${smartInboxApplied} Smart Inbox labels, ${failed} failed`);
     return { applied, failed, labelIds };
     
   } catch (error) {
@@ -347,7 +383,7 @@ export async function POST(request: NextRequest) {
   const startTime = performance.now();
   
   try {
-    console.log('⚡ OPTIMIZED PROCESSING: Starting high-performance email processing with Gmail labeling + reply analysis...');
+    console.log('⚡ OPTIMIZED PROCESSING: Starting high-performance email processing with Gmail labeling + reply analysis + Smart Inbox...');
 
     // Authentication
     const userEmail = await getUserEmail(request);
@@ -468,7 +504,7 @@ export async function POST(request: NextRequest) {
     console.log(`🧠 AI + Reply analysis complete: ${processedWithReplies.length} emails in ${aiTime}ms`);
     console.log(`🗑️ Email content discarded. AI processing took ${aiTime}ms`);
 
-    // 🏷️ APPLY GMAIL LABELS
+    // 🏷️ APPLY GMAIL LABELS + SMART INBOX
     const labelStartTime = performance.now();
     const labelResults = await applyGmailLabelsParallel(accessToken, processedWithReplies);
     const labelTime = Math.round(performance.now() - labelStartTime);
@@ -529,7 +565,7 @@ export async function POST(request: NextRequest) {
           saveMs: saveTime,
           emailsPerSecond: Math.round((savedResults.length * 1000) / totalTime)
         },
-        privacyNote: "Zero email content stored - optimized in-memory processing with Gmail labeling + reply analysis",
+        privacyNote: "Zero email content stored - optimized in-memory processing with Gmail labeling + reply analysis + Smart Inbox",
         user: {
           planType: limits.planType,
           emailsProcessed: limits.emailsProcessed + savedResults.length,

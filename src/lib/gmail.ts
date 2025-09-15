@@ -211,6 +211,7 @@ export async function createGmailLabel(accessToken: string, name: string, catego
       'shopping': { textColor: '#ffffff', backgroundColor: '#f691b3' }, // Pink
       'support': { textColor: '#ffffff', backgroundColor: '#a479e2' }, // Purple (ALLOWED)
       'other': { textColor: '#ffffff', backgroundColor: '#666666' }, // Gray
+      'smart-inbox': { textColor: '#ffffff', backgroundColor: '#f691b3' }, // Orange for the Smart Inbox
       'default': { textColor: '#ffffff', backgroundColor: '#666666' } // Gray
     };
 

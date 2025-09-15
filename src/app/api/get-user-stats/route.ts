@@ -1,8 +1,8 @@
-// src/app/api/get-user-stats/route.ts - Updated for email_cache_simple table with CORS
+// src/app/api/get-user-stats/route.ts - Updated for email_cache_simple table with CORS + Reply Analysis
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../auth/[...nextauth]/route';
-import { getOrCreateUser, checkUserLimits, getCategoryCounts } from '@/lib/supabase';
+import { getOrCreateUser, checkUserLimits, getCategoryCounts, getReplyCounts } from '@/lib/supabase';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 
@@ -79,6 +79,9 @@ export async function GET(request: NextRequest) {
     // Get category counts from email_cache_simple table (privacy-first)
     const categoryCounts = await getCategoryCounts(user.id);
 
+    // NEW: Get reply analysis stats
+    const replyStats = await getReplyCounts(user.id);
+
     // Get total organized emails count
     const totalOrganizedEmails = Object.values(categoryCounts).reduce((sum, count) => sum + count, 0);
 
@@ -102,7 +105,7 @@ export async function GET(request: NextRequest) {
       organized_at: item.created_at
     }));
 
-    console.log(`✅ Returning stats for ${totalOrganizedEmails} organized emails`);
+    console.log(`✅ Returning stats for ${totalOrganizedEmails} organized emails, ${replyStats.totalReplies} need replies`);
 
     return NextResponse.json({
       success: true,
@@ -130,10 +133,17 @@ export async function GET(request: NextRequest) {
           Archive: 0,
           Trash: 0
         },
+        // NEW: Include reply stats for frontend
+        replyStats: {
+          totalReplies: replyStats.totalReplies,
+          highUrgency: replyStats.highUrgency,
+          mediumUrgency: replyStats.mediumUrgency,
+          lowUrgency: replyStats.lowUrgency
+        },
         recentEmails: recentOrganizedEmails,
         totalEmails: totalOrganizedEmails,
         // Privacy note
-        privacyNote: "Only organization metadata stored - no email content"
+        privacyNote: "Only organization metadata stored - no email content + reply analysis"
       }
     }, { headers: corsHeaders });
 
