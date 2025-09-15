@@ -1,9 +1,9 @@
-// src/app/api/process-emails-fast/route.ts - Optimized with Parallel Processing + Gmail Labeling
+// src/app/api/process-emails-fast/route.ts - Optimized with Parallel Processing + Gmail Labeling + Reply Analysis
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../auth/[...nextauth]/route';
 import { fetchLatestEmails, createGmailLabel, applyLabelToEmail, getGmailLabels } from '@/lib/gmail';
-import { processEmailsInMemory } from '@/lib/openai';
+import { processEmailsInMemory, analyzeEmailForReply } from '@/lib/openai';  // ADDED analyzeEmailForReply
 import { 
   getOrCreateUser, 
   checkUserLimits,
@@ -56,7 +56,7 @@ async function getGmailAccessToken(request: NextRequest): Promise<string | null>
     return session.accessToken as string;
   }
 
-  const googleToken = request.headers.get('x-google-token');
+  const googleToken = request.headers.get('x-google-token') || request.headers.get('X-Google-Token');
   if (googleToken) {
     return googleToken;
   }
@@ -207,7 +207,7 @@ async function applyGmailLabelsParallel(
     console.log(`🎯 Categories to process: ${categories.join(', ')}`);
     
     for (const category of categories) {
-      const labelName = `Inboxie/${category}`;
+      const labelName = category;
       let labelId = labelMap.get(labelName.toLowerCase());
       
       if (!labelId) {
@@ -287,14 +287,14 @@ async function applyGmailLabelsParallel(
   }
 }
 
-// Parallel database saves
+// UPDATED: Parallel database saves with reply data
 async function saveMetadataParallel(
   processedMetadata: any[], 
   userId: string
 ): Promise<any[]> {
   const { DB_SAVE_CHUNK_SIZE } = PERFORMANCE_CONFIG;
   
-  console.log(`💾 PARALLEL SAVE: Saving ${processedMetadata.length} records in chunks of ${DB_SAVE_CHUNK_SIZE}`);
+  console.log(`💾 PARALLEL SAVE: Saving ${processedMetadata.length} records with reply analysis...`);
 
   // Split into chunks for parallel saving
   const chunks = [];
@@ -310,7 +310,10 @@ async function saveMetadataParallel(
           userId,
           metadata.category,
           metadata.date,
-          metadata.threadId
+          metadata.threadId,
+          metadata.needsReply,
+          metadata.replyReason,
+          metadata.urgency
         );
 
         return {
@@ -318,6 +321,8 @@ async function saveMetadataParallel(
           category: metadata.category,
           date: metadata.date,
           threadId: metadata.threadId,
+          needsReply: metadata.needsReply,
+          urgency: metadata.urgency,
           success: true
         };
       } catch (error) {
@@ -334,7 +339,7 @@ async function saveMetadataParallel(
   const allResults = await Promise.all(savePromises);
   const results = allResults.flat().filter(result => result !== null);
   
-  console.log(`✅ PARALLEL SAVE COMPLETE: ${results.length} records saved`);
+  console.log(`✅ PARALLEL SAVE COMPLETE: ${results.length} records saved with reply analysis`);
   return results;
 }
 
@@ -342,7 +347,7 @@ export async function POST(request: NextRequest) {
   const startTime = performance.now();
   
   try {
-    console.log('⚡ OPTIMIZED PROCESSING: Starting high-performance email processing with Gmail labeling...');
+    console.log('⚡ OPTIMIZED PROCESSING: Starting high-performance email processing with Gmail labeling + reply analysis...');
 
     // Authentication
     const userEmail = await getUserEmail(request);
@@ -418,23 +423,61 @@ export async function POST(request: NextRequest) {
       threadId: email.threadId || email.id
     }));
 
-    // 🧠 PARALLEL AI PROCESSING
+    // 🧠 PARALLEL AI PROCESSING + REPLY ANALYSIS
     const aiStartTime = performance.now();
+    
+    // Step 1: Get categories (existing)
     const processedMetadata = await processEmailsParallel(emailsForAI);
+    
+    // Step 2: NEW - Add reply analysis in parallel
+    console.log('🔍 ANALYZING REPLIES: Starting parallel reply analysis...');
+    const replyAnalysisPromises = processedMetadata.map(async (metadata, index) => {
+      try {
+        const originalEmail = emailsForAI[index];
+        
+        const replyAnalysis = await analyzeEmailForReply({
+          id: metadata.id,
+          from: originalEmail.from,
+          subject: originalEmail.subject,
+          body: originalEmail.body || originalEmail.snippet,
+          date: originalEmail.date,
+          category: metadata.category,
+          ai_category: metadata.category
+        });
+        
+        return {
+          ...metadata,
+          needsReply: replyAnalysis.needsReply,
+          replyReason: replyAnalysis.reason,
+          urgency: replyAnalysis.urgency
+        };
+      } catch (error) {
+        console.error(`Reply analysis failed for email ${metadata.id}:`, error);
+        return {
+          ...metadata,
+          needsReply: false,
+          replyReason: 'Analysis failed',
+          urgency: 'low'
+        };
+      }
+    });
+
+    const processedWithReplies = await Promise.all(replyAnalysisPromises);
     const aiTime = Math.round(performance.now() - aiStartTime);
 
+    console.log(`🧠 AI + Reply analysis complete: ${processedWithReplies.length} emails in ${aiTime}ms`);
     console.log(`🗑️ Email content discarded. AI processing took ${aiTime}ms`);
 
     // 🏷️ APPLY GMAIL LABELS
     const labelStartTime = performance.now();
-    const labelResults = await applyGmailLabelsParallel(accessToken, processedMetadata);
+    const labelResults = await applyGmailLabelsParallel(accessToken, processedWithReplies);
     const labelTime = Math.round(performance.now() - labelStartTime);
 
     console.log(`🏷️ Gmail labeling complete: ${labelResults.applied} applied, ${labelResults.failed} failed (${labelTime}ms)`);
 
     // 💾 PARALLEL DATABASE SAVES
     const saveStartTime = performance.now();
-    const savedResults = await saveMetadataParallel(processedMetadata, user.id);
+    const savedResults = await saveMetadataParallel(processedWithReplies, user.id);
     const saveTime = Math.round(performance.now() - saveStartTime);
 
     // Update user email count

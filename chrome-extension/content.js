@@ -1,9 +1,7 @@
 console.log('Inboxie content script loaded!');
 
-// Configuration - Update these URLs to match your backend
-const API_BASE_URL = 'http://localhost:3000'; // Change to your actual domain in production
-
-// Initialize authentication
+// Configuration
+const API_BASE_URL = 'http://localhost:3000';
 const auth = new ExtensionAuth(API_BASE_URL);
 
 // State management
@@ -15,36 +13,25 @@ let dashboardData = {
   isProcessing: false,
   isAuthenticated: false,
   categories: {},
-  lastProcessingTime: 0
+  replyStats: { totalReplies: 0, highUrgency: 0, mediumUrgency: 0, lowUrgency: 0 }
 };
 
-// Wait for Gmail to fully load, then inject dashboard
+// Wait for Gmail to load
 setTimeout(() => {
   console.log('Injecting Inboxie dashboard...');
   injectDashboard();
-  
-  // Start fetching real data
   fetchDashboardData();
-  
-  // Refresh data every 30 seconds
   setInterval(fetchDashboardData, 30000);
 }, 2000);
 
-// Fetch real data from your backend
+// Fetch data from backend
 async function fetchDashboardData() {
   try {
-    console.log('Fetching dashboard data...');
-    
-    // Make direct API call to get user stats
     const response = await auth.apiCall('/api/get-user-stats');
-
     if (response.ok) {
       const result = await response.json();
-      console.log('Backend response:', result);
-      
       if (result.success && result.data) {
         const stats = result.data;
-        
         dashboardData = {
           emailsOrganized: stats.user?.emailsProcessed || 0,
           emailsLimit: stats.user?.limit || 500,
@@ -53,66 +40,85 @@ async function fetchDashboardData() {
           isProcessing: false,
           isAuthenticated: true,
           categories: stats.folderCounts || {},
-          lastProcessingTime: dashboardData.lastProcessingTime
+          replyStats: stats.replyStats || { totalReplies: 0, highUrgency: 0, mediumUrgency: 0, lowUrgency: 0 }
         };
-        
         updateDashboardUI();
-        console.log('Live data loaded successfully!');
+        console.log('Data loaded successfully!');
         return;
       }
     }
   } catch (error) {
-    console.log('Not authenticated or API failed:', error.message);
+    console.log('Not authenticated:', error.message);
     dashboardData.isAuthenticated = false;
     updateDashboardUI();
   }
 }
 
-// Update dashboard UI with real data
+// Update UI with data
 function updateDashboardUI() {
-  // Show/hide authentication card based on auth status
   const authCard = document.querySelector('.auth-card');
   const logoutCard = document.querySelector('.logout-card');
   const dataCards = document.querySelectorAll('.inboxie-card:not(.auth-card):not(.logout-card)');
   
+  console.log('Auth status:', dashboardData.isAuthenticated);
+  
   if (!dashboardData.isAuthenticated) {
-    // Show login card, hide data cards and logout
-    if (authCard) authCard.style.display = 'flex';
-    if (logoutCard) logoutCard.style.display = 'none';
-    dataCards.forEach(card => card.style.display = 'none');
-    return;
-  } else {
-    // Hide login card, show data cards and logout
-    if (authCard) authCard.style.display = 'none';
-    if (logoutCard) logoutCard.style.display = 'flex';
-    dataCards.forEach(card => card.style.display = 'flex');
+    // NOT AUTHENTICATED: Show only login card
+    if (authCard) {
+      authCard.style.display = 'flex';
+      console.log('Showing login card');
+    }
+    if (logoutCard) {
+      logoutCard.style.display = 'none';
+      console.log('Hiding logout card');
+    }
+    dataCards.forEach(card => {
+      card.style.display = 'none';
+      console.log('Hiding data card');
+    });
+    return; // IMPORTANT: Exit early
   }
+  
+  // AUTHENTICATED: Show data cards and logout, hide login
+  if (authCard) {
+    authCard.style.display = 'none';
+    console.log('Hiding login card');
+  }
+  if (logoutCard) {
+    logoutCard.style.display = 'flex';
+    console.log('Showing logout card');
+  }
+  dataCards.forEach(card => {
+    card.style.display = 'flex';
+    console.log('Showing data card');
+  });
 
-  // Update Emails Organized
-  const emailsOrganizedValue = document.querySelector('.emails-organized .card-value');
-  const emailsOrganizedSubtitle = document.querySelector('.emails-organized .card-subtitle');
-  if (emailsOrganizedValue) {
-    emailsOrganizedValue.textContent = `${dashboardData.emailsOrganized}/${dashboardData.emailsLimit}`;
-  }
-  if (emailsOrganizedSubtitle) {
-    emailsOrganizedSubtitle.textContent = `${dashboardData.planType === 'free' ? 'Free' : 'Pro'} plan usage`;
-  }
+  // Update emails organized
+  const emailsValue = document.querySelector('.emails-organized .card-value');
+  const emailsSubtitle = document.querySelector('.emails-organized .card-subtitle');
+  if (emailsValue) emailsValue.textContent = `${dashboardData.emailsOrganized}/${dashboardData.emailsLimit}`;
+  if (emailsSubtitle) emailsSubtitle.textContent = `${dashboardData.planType === 'free' ? 'Free' : 'Pro'} plan usage`;
 
-  // Update Import Status
+  // Update import status
   const importValue = document.querySelector('.import-status .card-value');
   const importSubtitle = document.querySelector('.import-status .card-subtitle');
+  const importCard = document.querySelector('.import-status');
+  
   if (importValue) {
     if (dashboardData.isProcessing) {
       importValue.textContent = 'Processing...';
+      importCard?.classList.add('processing');
     } else if (dashboardData.importRemaining > 0) {
       importValue.textContent = `${dashboardData.importRemaining} left`;
+      importCard?.classList.remove('processing');
     } else {
       importValue.textContent = 'Complete';
+      importCard?.classList.remove('processing');
     }
   }
   if (importSubtitle) {
     if (dashboardData.isProcessing) {
-      importSubtitle.textContent = `Processing emails with AI...`;
+      importSubtitle.textContent = 'Processing emails with AI...';
     } else if (dashboardData.importRemaining > 0) {
       importSubtitle.textContent = 'Ready to organize more emails';
     } else {
@@ -120,19 +126,33 @@ function updateDashboardUI() {
     }
   }
 
-  // Update category breakdown
+  updateReplyAnalysis();
   updateCategoryBreakdown();
+}
 
-  // Update performance info if available
-  if (dashboardData.lastProcessingTime > 0) {
-    const performanceCard = document.querySelector('.performance-info .card-value');
-    if (performanceCard) {
-      performanceCard.textContent = `${dashboardData.lastProcessingTime}ms`;
-    }
+// Update reply analysis
+function updateReplyAnalysis() {
+  const replyValue = document.querySelector('.reply-analysis .card-value');
+  const replyBreakdown = document.querySelector('.reply-breakdown');
+  
+  if (replyValue) {
+    const total = dashboardData.replyStats.totalReplies;
+    replyValue.textContent = total > 0 ? `${total} need replies` : 'All caught up';
+  }
+  
+  if (replyBreakdown && dashboardData.replyStats.totalReplies > 0) {
+    const { highUrgency, mediumUrgency, lowUrgency } = dashboardData.replyStats;
+    replyBreakdown.innerHTML = `
+      ${highUrgency > 0 ? `<span class="urgency-badge urgency-high">${highUrgency} high</span>` : ''}
+      ${mediumUrgency > 0 ? `<span class="urgency-badge urgency-medium">${mediumUrgency} medium</span>` : ''}
+      ${lowUrgency > 0 ? `<span class="urgency-badge urgency-low">${lowUrgency} low</span>` : ''}
+    `;
+  } else if (replyBreakdown) {
+    replyBreakdown.innerHTML = '';
   }
 }
 
-// Update category breakdown display
+// Update category breakdown
 function updateCategoryBreakdown() {
   const categoryContainer = document.querySelector('.category-breakdown .category-list');
   if (!categoryContainer) return;
@@ -145,26 +165,20 @@ function updateCategoryBreakdown() {
     return;
   }
 
-  // Sort categories by count (highest first)
   const sortedCategories = Object.entries(categories)
     .filter(([_, count]) => count > 0)
     .sort(([, a], [, b]) => b - a)
-    .slice(0, 6); // Show top 6 categories
+    .slice(0, 6);
 
   const categoryIcons = {
-    'Work': '💼',
-    'Personal': '👤', 
-    'Newsletter': '📰',
-    'Shopping': '🛒',
-    'Support': '🎧',
-    'Other': '📂'
+    'Work': '💼', 'Personal': '👤', 'Newsletter': '📰',
+    'Shopping': '🛒', 'Support': '🎧', 'Other': '📂'
   };
 
   categoryContainer.innerHTML = sortedCategories
     .map(([category, count]) => {
       const percentage = Math.round((count / totalEmails) * 100);
       const icon = categoryIcons[category] || '📁';
-      
       return `
         <div class="category-item">
           <span class="category-icon">${icon}</span>
@@ -173,27 +187,26 @@ function updateCategoryBreakdown() {
           <span class="category-percentage">(${percentage}%)</span>
         </div>
       `;
-    })
-    .join('');
+    }).join('');
 }
 
-// Create and inject the dashboard
+// Create dashboard
 function injectDashboard() {
-  // Check if dashboard already exists
-  if (document.getElementById('inboxie-dashboard')) {
-    return;
-  }
+  if (document.getElementById('inboxie-dashboard')) return;
 
-  // Create dashboard container
   const dashboard = document.createElement('div');
   dashboard.id = 'inboxie-dashboard';
   dashboard.innerHTML = `
     <div class="inboxie-header">
       <h3>📧 Inboxie AI Organizer</h3>
-      <button id="inboxie-toggle">−</button>
+      <div class="header-controls">
+        <button id="position-btn" title="Position">📍</button>
+        <button id="compact-btn" title="Compact">⬅️</button>
+        <button id="toggle-btn" title="Minimize">−</button>
+      </div>
     </div>
-    <div class="inboxie-cards" id="inboxie-cards">
-      <div class="inboxie-card emails-organized" data-action="view-organized">
+    <div class="inboxie-cards">
+      <div class="inboxie-card emails-organized">
         <div class="card-icon">📊</div>
         <div class="card-content">
           <h4>Emails Organized</h4>
@@ -211,6 +224,16 @@ function injectDashboard() {
         </div>
       </div>
 
+      <div class="inboxie-card reply-analysis">
+        <div class="card-icon">💬</div>
+        <div class="card-content">
+          <h4>Pending Replies</h4>
+          <div class="card-value">All caught up</div>
+          <div class="card-subtitle">AI-detected action items</div>
+          <div class="reply-breakdown"></div>
+        </div>
+      </div>
+
       <div class="inboxie-card category-breakdown">
         <div class="card-icon">🏷️</div>
         <div class="card-content">
@@ -218,15 +241,6 @@ function injectDashboard() {
           <div class="category-list">
             <div class="no-categories">No emails organized yet</div>
           </div>
-        </div>
-      </div>
-
-      <div class="inboxie-card performance-info" style="display: none;">
-        <div class="card-icon">⚡</div>
-        <div class="card-content">
-          <h4>Last Processing</h4>
-          <div class="card-value">--ms</div>
-          <div class="card-subtitle">High-performance AI processing</div>
         </div>
       </div>
 
@@ -248,72 +262,281 @@ function injectDashboard() {
         </div>
       </div>
     </div>
-  `;
-
-  // Position it like Grammarly - bottom right initially
-  dashboard.style.cssText = `
-    position: fixed !important;
-    bottom: 20px !important;
-    right: 20px !important;
-    z-index: 999999 !important;
-    pointer-events: auto !important;
+    <div class="resize-handle"></div>
   `;
 
   document.body.appendChild(dashboard);
-  console.log('Dashboard injected!');
-
-  // Add event listeners
+  loadDashboardState();
+  setupControls();
+  makeDraggable();
+  makeResizable();
+  
+  // Card clicks
   setTimeout(() => {
-    // Toggle functionality with proper minimization
-    const toggleButton = document.getElementById('inboxie-toggle');
-    if (toggleButton) {
-      toggleButton.addEventListener('click', function() {
-        const dashboard = document.getElementById('inboxie-dashboard');
-        
-        if (dashboard.classList.contains('minimized')) {
-          dashboard.classList.remove('minimized');
-          this.textContent = '−';
-        } else {
-          dashboard.classList.add('minimized');
-          this.textContent = '+';
-        }
-      });
-    }
-
-    // Make dashboard draggable
-    makeDashboardDraggable();
-
-    // Card click handlers
-    const cards = document.querySelectorAll('.inboxie-card[data-action]');
-    cards.forEach(card => {
+    document.querySelectorAll('.inboxie-card[data-action]').forEach(card => {
       card.addEventListener('click', function() {
-        const action = this.getAttribute('data-action');
-        handleCardClick(action);
+        handleCardClick(this.getAttribute('data-action'));
       });
-      
-      card.style.cursor = 'pointer';
     });
   }, 100);
+}
+
+// Setup control buttons
+function setupControls() {
+  // Position toggle
+  document.getElementById('position-btn')?.addEventListener('click', () => {
+    const dashboard = document.getElementById('inboxie-dashboard');
+    if (dashboard.classList.contains('side-left')) {
+      dashboard.classList.remove('side-left');
+      dashboard.classList.add('side-right');
+    } else if (dashboard.classList.contains('side-right')) {
+      dashboard.classList.remove('side-right');
+      resetToCorner();
+    } else {
+      dashboard.classList.add('side-left');
+      resetToCorner();
+    }
+    saveDashboardState();
+  });
+
+  // Compact toggle
+  document.getElementById('compact-btn')?.addEventListener('click', (e) => {
+    const dashboard = document.getElementById('inboxie-dashboard');
+    const btn = e.target;
+    if (dashboard.classList.contains('compact')) {
+      dashboard.classList.remove('compact');
+      btn.textContent = '⬅️';
+      btn.title = 'Compact';
+    } else {
+      dashboard.classList.add('compact');
+      btn.textContent = '➡️';
+      btn.title = 'Expand';
+    }
+    saveDashboardState();
+  });
+
+  // Minimize toggle
+  document.getElementById('toggle-btn')?.addEventListener('click', (e) => {
+    const dashboard = document.getElementById('inboxie-dashboard');
+    const btn = e.target;
+    if (dashboard.classList.contains('minimized')) {
+      dashboard.classList.remove('minimized');
+      btn.textContent = '−';
+    } else {
+      dashboard.classList.add('minimized');
+      btn.textContent = '+';
+    }
+    saveDashboardState();
+  });
+
+  // Make entire minimized dashboard clickable to expand
+  document.querySelector('.inboxie-header')?.addEventListener('click', (e) => {
+    const dashboard = document.getElementById('inboxie-dashboard');
+    const btn = document.getElementById('toggle-btn');
+    
+    // Only expand if minimized and not clicking other buttons
+    if (dashboard.classList.contains('minimized') && !e.target.closest('button')) {
+      dashboard.classList.remove('minimized');
+      btn.textContent = '−';
+      saveDashboardState();
+    }
+  });
+}
+
+function resetToCorner() {
+  const dashboard = document.getElementById('inboxie-dashboard');
+  dashboard.style.removeProperty('left');
+  dashboard.style.removeProperty('top');
+  dashboard.style.removeProperty('transform');
+  dashboard.style.right = '20px';
+  dashboard.style.bottom = '20px';
+}
+
+// Make draggable
+function makeDraggable() {
+  const dashboard = document.getElementById('inboxie-dashboard');
+  const header = document.querySelector('.inboxie-header');
+  if (!dashboard || !header) return;
+
+  let isDragging = false;
+  let startX, startY, offsetX, offsetY;
+
+  header.addEventListener('mousedown', (e) => {
+    if (e.target.closest('button')) return;
+    
+    isDragging = true;
+    dashboard.classList.add('dragging');
+    
+    const rect = dashboard.getBoundingClientRect();
+    startX = e.clientX;
+    startY = e.clientY;
+    offsetX = rect.left;
+    offsetY = rect.top;
+    
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    
+    const deltaX = e.clientX - startX;
+    const deltaY = e.clientY - startY;
+    
+    const newX = Math.max(0, Math.min(offsetX + deltaX, window.innerWidth - dashboard.offsetWidth));
+    const newY = Math.max(0, Math.min(offsetY + deltaY, window.innerHeight - dashboard.offsetHeight));
+    
+    dashboard.style.left = newX + 'px';
+    dashboard.style.top = newY + 'px';
+    dashboard.style.removeProperty('right');
+    dashboard.style.removeProperty('bottom');
+    dashboard.style.removeProperty('transform');
+    dashboard.classList.remove('side-left', 'side-right');
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (isDragging) {
+      isDragging = false;
+      dashboard.classList.remove('dragging');
+      saveDashboardState();
+    }
+  });
+}
+
+// Make resizable
+function makeResizable() {
+  const dashboard = document.getElementById('inboxie-dashboard');
+  const resizeHandle = document.querySelector('.resize-handle');
+  if (!dashboard || !resizeHandle) return;
+
+  let isResizing = false;
+  let startX, startY, startWidth, startHeight;
+
+  resizeHandle.addEventListener('mousedown', (e) => {
+    isResizing = true;
+    
+    const rect = dashboard.getBoundingClientRect();
+    startX = e.clientX;
+    startY = e.clientY;
+    startWidth = rect.width;
+    startHeight = rect.height;
+    
+    dashboard.style.userSelect = 'none';
+    document.body.style.cursor = 'nw-resize';
+    
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!isResizing) return;
+    
+    const deltaX = e.clientX - startX;
+    const deltaY = e.clientY - startY;
+    
+    const newWidth = Math.max(280, Math.min(600, startWidth + deltaX));
+    const newHeight = Math.max(200, Math.min(800, startHeight + deltaY));
+    
+    dashboard.style.width = newWidth + 'px';
+    dashboard.style.height = newHeight + 'px';
+    dashboard.style.maxHeight = newHeight + 'px';
+    
+    // Remove preset classes when manually resizing
+    dashboard.classList.remove('compact', 'side-left', 'side-right');
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (isResizing) {
+      isResizing = false;
+      dashboard.style.userSelect = '';
+      document.body.style.cursor = '';
+      saveDashboardState();
+    }
+  });
+}
+
+// Save/load state
+function saveDashboardState() {
+  const dashboard = document.getElementById('inboxie-dashboard');
+  if (!dashboard) return;
+
+  const state = {
+    minimized: dashboard.classList.contains('minimized'),
+    compact: dashboard.classList.contains('compact'),
+    sideLeft: dashboard.classList.contains('side-left'),
+    sideRight: dashboard.classList.contains('side-right'),
+    position: {
+      left: dashboard.style.left,
+      top: dashboard.style.top,
+      right: dashboard.style.right,
+      bottom: dashboard.style.bottom
+    },
+    size: {
+      width: dashboard.style.width,
+      height: dashboard.style.height,
+      maxHeight: dashboard.style.maxHeight
+    }
+  };
+
+  localStorage.setItem('inboxie-dashboard-state', JSON.stringify(state));
+}
+
+function loadDashboardState() {
+  try {
+    const saved = localStorage.getItem('inboxie-dashboard-state');
+    if (!saved) return;
+
+    const state = JSON.parse(saved);
+    const dashboard = document.getElementById('inboxie-dashboard');
+
+    if (state.minimized) {
+      dashboard.classList.add('minimized');
+      document.getElementById('toggle-btn').textContent = '+';
+    }
+
+    if (state.compact) {
+      dashboard.classList.add('compact');
+      const btn = document.getElementById('compact-btn');
+      btn.textContent = '➡️';
+      btn.title = 'Expand';
+    }
+
+    if (state.sideLeft) {
+      dashboard.classList.add('side-left');
+    } else if (state.sideRight) {
+      dashboard.classList.add('side-right');
+    }
+
+    if (state.position) {
+      const pos = state.position;
+      if (pos.left) dashboard.style.left = pos.left;
+      if (pos.top) dashboard.style.top = pos.top;
+      if (pos.right) dashboard.style.right = pos.right;
+      if (pos.bottom) dashboard.style.bottom = pos.bottom;
+    }
+
+    if (state.size) {
+      const size = state.size;
+      if (size.width) dashboard.style.width = size.width;
+      if (size.height) dashboard.style.height = size.height;
+      if (size.maxHeight) dashboard.style.maxHeight = size.maxHeight;
+    }
+  } catch (error) {
+    console.log('Failed to load state:', error);
+  }
 }
 
 // Handle card clicks
 async function handleCardClick(action) {
   switch (action) {
     case 'authenticate':
-      console.log('Starting authentication...');
       const success = await auth.authenticate();
-      if (success) {
-        console.log('Authentication successful, refreshing data...');
-        await fetchDashboardData();
-      }
+      if (success) await fetchDashboardData();
       break;
-
+      
     case 'logout':
-      console.log('Logging out...');
       await auth.clearAuth();
       dashboardData.isAuthenticated = false;
       updateDashboardUI();
-      console.log('Logged out successfully');
       break;
       
     case 'import':
@@ -324,55 +547,34 @@ async function handleCardClick(action) {
   }
 }
 
-// Start import process with optimized API
+// Start import
 async function startImport() {
   try {
     dashboardData.isProcessing = true;
     updateDashboardUI();
     
-    console.log('🚀 Starting optimized email processing...');
-    const startTime = performance.now();
-    
     const response = await auth.apiCall('/api/process-emails-fast', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        emailLimit: 50 // Process 50 emails at a time
-      })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ emailLimit: 50 })
     });
 
     if (response.ok) {
       const result = await response.json();
-      console.log('Processing result:', result);
-      
       if (result.success) {
-        const processingTime = Math.round(performance.now() - startTime);
-        dashboardData.lastProcessingTime = processingTime;
-        
-        // Show performance info card
-        const performanceCard = document.querySelector('.performance-info');
-        if (performanceCard) {
-          performanceCard.style.display = 'flex';
+        if (result.data.replies) {
+          dashboardData.replyStats = result.data.replies;
         }
-        
-        console.log(`✅ Processed ${result.data.processed} emails in ${processingTime}ms`);
-        console.log('📊 Categories:', result.data.categories);
-        
-        // Refresh dashboard data to show new results
+        console.log(`✅ Processed ${result.data.processed} emails`);
         setTimeout(fetchDashboardData, 1000);
       } else {
-        console.log('Processing failed:', result.error);
         alert(`Processing failed: ${result.error}`);
       }
     } else {
       const errorResult = await response.json();
-      console.log('Processing request failed:', errorResult);
       alert(`Processing failed: ${errorResult.error || 'Unknown error'}`);
     }
   } catch (error) {
-    console.log('Processing request failed:', error);
     alert(`Processing failed: ${error.message}`);
   } finally {
     dashboardData.isProcessing = false;
@@ -380,71 +582,14 @@ async function startImport() {
   }
 }
 
-// Make dashboard draggable by header
-function makeDashboardDraggable() {
-  const dashboard = document.getElementById('inboxie-dashboard');
-  const header = document.querySelector('.inboxie-header');
-  
-  if (!dashboard || !header) return;
-
-  let isDragging = false;
-  let startX, startY, offsetX, offsetY;
-
-  header.addEventListener('mousedown', function(e) {
-    // Don't drag if clicking the toggle button
-    if (e.target.id === 'inboxie-toggle') return;
-    
-    isDragging = true;
-    dashboard.classList.add('dragging');
-    
-    // Get current position
-    const rect = dashboard.getBoundingClientRect();
-    startX = e.clientX;
-    startY = e.clientY;
-    offsetX = rect.left;
-    offsetY = rect.top;
-    
-    e.preventDefault();
-  });
-
-  document.addEventListener('mousemove', function(e) {
-    if (!isDragging) return;
-    
-    const deltaX = e.clientX - startX;
-    const deltaY = e.clientY - startY;
-    
-    const newX = offsetX + deltaX;
-    const newY = offsetY + deltaY;
-    
-    // Keep within viewport bounds
-    const maxX = window.innerWidth - dashboard.offsetWidth;
-    const maxY = window.innerHeight - dashboard.offsetHeight;
-    
-    const clampedX = Math.max(0, Math.min(newX, maxX));
-    const clampedY = Math.max(0, Math.min(newY, maxY));
-    
-    dashboard.style.left = clampedX + 'px';
-    dashboard.style.top = clampedY + 'px';
-  });
-
-  document.addEventListener('mouseup', function() {
-    if (isDragging) {
-      isDragging = false;
-      dashboard.classList.remove('dragging');
-    }
-  });
-}
-
-// Handle Gmail navigation changes
+// Handle Gmail navigation
 let currentUrl = window.location.href;
 setInterval(() => {
   if (window.location.href !== currentUrl) {
     currentUrl = window.location.href;
-    // Remove existing dashboard
     const existing = document.getElementById('inboxie-dashboard');
     if (existing) existing.remove();
     
-    // Re-inject after navigation
     setTimeout(() => {
       if (!document.getElementById('inboxie-dashboard')) {
         injectDashboard();

@@ -42,9 +42,8 @@ export default withAuth(
         }
         
         // Allow specific extension endpoints from Gmail to pass through
-        if (req.headers.get('origin') === 'https://mail.google.com' && 
-            (req.nextUrl.pathname === '/api/extension/auth' ||
-             req.nextUrl.pathname === '/api/extension/validate' ||
+        if (req.nextUrl.pathname === '/api/extension/auth' || 
+            (req.nextUrl.pathname === '/api/extension/validate' ||
              req.nextUrl.pathname === '/api/extension/session-check' ||
              req.nextUrl.pathname === '/api/get-user-stats' ||
              req.nextUrl.pathname === '/api/process-emails-fast')) {

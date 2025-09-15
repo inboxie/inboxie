@@ -109,7 +109,19 @@ function parseGmailMessage(message: any): EmailData | null {
     const subject = headers.find((h: any) => h.name === 'Subject')?.value || '';
     const from = headers.find((h: any) => h.name === 'From')?.value || '';
     const to = headers.find((h: any) => h.name === 'To')?.value || '';
-    const date = headers.find((h: any) => h.name === 'Date')?.value || '';
+    const dateHeader = headers.find((h: any) => h.name === 'Date')?.value || '';
+
+    // Convert Gmail date to ISO format for database compatibility
+    let date = new Date().toISOString(); // fallback to now
+    if (dateHeader) {
+      try {
+        // Parse Gmail date format and convert to ISO
+        date = new Date(dateHeader).toISOString();
+      } catch (error) {
+        console.warn('Failed to parse date:', dateHeader);
+        date = new Date().toISOString();
+      }
+    }
 
     // Extract email body
     let body = '';
@@ -133,7 +145,7 @@ function parseGmailMessage(message: any): EmailData | null {
       to: cleanText(to),
       body: cleanText(body),
       snippet: cleanText(message.snippet || ''),
-      date,
+      date, // Now properly formatted as ISO string
       labels: message.labelIds || [],
     };
   } catch (error) {
