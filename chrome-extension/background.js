@@ -1,44 +1,44 @@
-// background.js - Service Worker with OAuth handling
+// background.js - Service Worker with Direct Chrome OAuth
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'authenticate') {
     handleAuthentication(request.apiBaseUrl)
-      .then(result => sendResponse({ success: true, token: result }))
+      .then(result => sendResponse({ success: true, userInfo: result }))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true; // Keep message channel open for async response
   }
   
   if (request.action === 'validateToken') {
-    validateToken(request.token, request.apiBaseUrl)
-      .then(valid => sendResponse({ success: true, valid: valid }))
+    validateTokenWithBackend(request.apiBaseUrl)
+      .then(result => sendResponse({ success: true, valid: result.valid, userInfo: result.userInfo }))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
 });
 
 /**
- * Handle OAuth authentication flow
+ * Handle Chrome OAuth authentication flow with backend validation
  */
 async function handleAuthentication(apiBaseUrl) {
   try {
-    console.log('Background: Starting OAuth authentication...');
+    console.log('Background: Starting Chrome OAuth authentication...');
     
-    // Get OAuth token using Chrome identity API
-    const googleToken = await getChromeIdentityToken();
+    // Get Gmail OAuth token using Chrome identity API
+    const gmailToken = await getChromeGmailToken();
     
-    if (!googleToken) {
-      throw new Error('Failed to get OAuth token from Chrome');
+    if (!gmailToken) {
+      throw new Error('Failed to get Gmail token from Chrome');
     }
     
-    console.log('Background: Got Chrome token, exchanging with backend...');
+    console.log('Background: Got Gmail token, validating with backend...');
     
-    // Exchange Google token for backend JWT
-    const backendToken = await exchangeTokenWithBackend(googleToken, apiBaseUrl);
+    // Authenticate with backend using Gmail token
+    const userInfo = await authenticateWithBackend(gmailToken, apiBaseUrl);
     
-    // Store BOTH tokens
-    await storeTokens(backendToken, googleToken);
+    // Store Gmail token for future API calls
+    await storeGmailToken(gmailToken);
     
-    console.log('Background: Authentication successful!');
-    return backendToken;
+    console.log('Background: Authentication successful!', userInfo.email);
+    return userInfo;
     
   } catch (error) {
     console.error('Background: Authentication failed:', error);
@@ -47,39 +47,45 @@ async function handleAuthentication(apiBaseUrl) {
 }
 
 /**
- * Get OAuth token using Chrome identity API - FIXED VERSION
+ * Get Gmail OAuth token using Chrome identity API
  */
-async function getChromeIdentityToken() {
+async function getChromeGmailToken() {
   return new Promise((resolve, reject) => {
-    console.log('Background: Requesting Chrome identity token...');
+    console.log('Background: Requesting Gmail permissions...');
     
-    chrome.identity.getAuthToken({ interactive: true }, (token) => {
+    chrome.identity.getAuthToken({
+      interactive: true,
+      scopes: [
+        'https://www.googleapis.com/auth/gmail.readonly',  // ESSENTIAL - needed to read emails
+        'https://www.googleapis.com/auth/gmail.modify',
+        'https://www.googleapis.com/auth/gmail.labels',
+        'https://www.googleapis.com/auth/userinfo.email',
+        'https://www.googleapis.com/auth/userinfo.profile'
+      ]
+    }, (token) => {
       if (chrome.runtime.lastError) {
         console.error('Background: Chrome identity error:', chrome.runtime.lastError);
         reject(chrome.runtime.lastError);
       } else if (token) {
-        console.log('Background: Access token received successfully');
+        console.log('Background: Gmail token received successfully');
         resolve(token);
       } else {
-        reject(new Error('No access token received'));
+        reject(new Error('No Gmail token received'));
       }
     });
   });
 }
 
 /**
- * Exchange Google OAuth token for backend JWT token
+ * Authenticate with backend using Gmail token
  */
-async function exchangeTokenWithBackend(googleToken, apiBaseUrl) {
-  const response = await fetch(`${apiBaseUrl}/api/extension/auth`, {
+async function authenticateWithBackend(gmailToken, apiBaseUrl) {
+  const response = await fetch(`${apiBaseUrl}/api/auth/extension`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      googleToken: googleToken,
-      extensionId: chrome.runtime.id
-    })
+      'Content-Type': 'application/json',
+      'X-Gmail-Token': gmailToken
+    }
   });
 
   if (!response.ok) {
@@ -88,47 +94,77 @@ async function exchangeTokenWithBackend(googleToken, apiBaseUrl) {
   }
 
   const data = await response.json();
-  if (!data.success || !data.token) {
+  if (!data.success || !data.user) {
     throw new Error('Invalid response from backend');
   }
 
-  return data.token;
+  return data.user;
 }
 
 /**
- * Validate token with backend
+ * Validate authentication status with backend
  */
-async function validateToken(token, apiBaseUrl) {
+async function validateTokenWithBackend(apiBaseUrl) {
   try {
-    const response = await fetch(`${apiBaseUrl}/api/extension/validate`, {
+    // Get stored Gmail token
+    const gmailToken = await getStoredGmailToken();
+    
+    if (!gmailToken) {
+      return { valid: false, userInfo: null };
+    }
+
+    const response = await fetch(`${apiBaseUrl}/api/auth/extension`, {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'X-Gmail-Token': gmailToken
       }
     });
-    return response.ok;
+
+    if (response.ok) {
+      const data = await response.json();
+      return { 
+        valid: data.success, 
+        userInfo: data.success ? data.user : null 
+      };
+    } else {
+      return { valid: false, userInfo: null };
+    }
   } catch (error) {
     console.error('Background: Token validation failed:', error);
-    return false;
+    return { valid: false, userInfo: null };
   }
 }
 
 /**
- * Store both JWT and Google tokens in Chrome storage
+ * Store Gmail token in Chrome storage
  */
-async function storeTokens(jwtToken, googleToken) {
+async function storeGmailToken(gmailToken) {
   return new Promise((resolve, reject) => {
     chrome.storage.local.set({
-      'inboxie_jwt_token': jwtToken,
-      'inboxie_google_token': googleToken,
-      'inboxie_auth_timestamp': Date.now()
+      'gmail_token': gmailToken,
+      'auth_timestamp': Date.now()
     }, () => {
       if (chrome.runtime.lastError) {
         reject(chrome.runtime.lastError);
       } else {
-        console.log('Background: Stored both JWT and Google tokens');
+        console.log('Background: Gmail token stored');
         resolve();
+      }
+    });
+  });
+}
+
+/**
+ * Get stored Gmail token
+ */
+async function getStoredGmailToken() {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.get(['gmail_token'], (result) => {
+      if (chrome.runtime.lastError) {
+        reject(chrome.runtime.lastError);
+      } else {
+        resolve(result.gmail_token || null);
       }
     });
   });

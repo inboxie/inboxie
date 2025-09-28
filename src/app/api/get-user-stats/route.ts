@@ -1,52 +1,52 @@
-// src/app/api/get-user-stats/route.ts - Updated for email_cache_simple table with CORS + Reply Analysis
+// src/app/api/get-user-stats/route.ts - Updated with Chrome Extension Authentication
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '../auth/[...nextauth]/route';
 import { getOrCreateUser, checkUserLimits, getCategoryCounts, getReplyCounts } from '@/lib/supabase';
 import { createClient } from '@supabase/supabase-js';
-import jwt from 'jsonwebtoken';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_ANON_KEY!
 );
 
-const JWT_SECRET = process.env.NEXTAUTH_SECRET || 'your-fallback-secret';
-
 // CORS headers for extension requests
 const corsHeaders = {
   'Access-Control-Allow-Origin': 'https://mail.google.com',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Google-Token',
+  'Access-Control-Allow-Headers': 'Content-Type, X-Gmail-Token', // Updated for Gmail token
   'Access-Control-Allow-Credentials': 'true'
 };
 
-// Helper function to get user email from either NextAuth session OR extension JWT
-async function getUserEmail(request: NextRequest): Promise<string | null> {
-  // Try NextAuth session first (for web app)
-  const session = await getServerSession(authOptions);
-  if (session?.user?.email) {
-    console.log('🌐 Using NextAuth session for:', session.user.email);
-    return session.user.email;
-  }
-
-  // Try extension JWT token (for Chrome extension)
-  const authHeader = request.headers.get('authorization');
-  if (authHeader?.startsWith('Bearer ')) {
-    const token = authHeader.substring(7);
-    
-    try {
-      const decoded = jwt.verify(token, JWT_SECRET) as any;
-      if (decoded.email && decoded.type === 'extension') {
-        console.log('🔧 Using extension JWT for:', decoded.email);
-        return decoded.email;
-      }
-    } catch (error) {
-      console.error('❌ Invalid extension JWT:', error);
+/**
+ * Validate Gmail token and get user info
+ */
+async function validateGmailTokenAndGetUser(token: string): Promise<{ email: string; isValid: boolean }> {
+  try {
+    // Validate token with Google
+    const tokenResponse = await fetch(`https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=${token}`);
+    if (!tokenResponse.ok) {
+      return { email: '', isValid: false };
     }
-  }
 
-  return null;
+    // Get user profile
+    const profileResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    if (!profileResponse.ok) {
+      return { email: '', isValid: false };
+    }
+
+    const profile = await profileResponse.json();
+    return {
+      email: profile.email,
+      isValid: true
+    };
+  } catch (error) {
+    console.error('Token validation failed:', error);
+    return { email: '', isValid: false };
+  }
 }
 
 export async function OPTIONS(request: NextRequest) {
@@ -58,13 +58,23 @@ export async function OPTIONS(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    // Get user email from either NextAuth session or extension JWT
-    const userEmail = await getUserEmail(request);
+    // Get Gmail token from Chrome extension
+    const gmailToken = request.headers.get('x-gmail-token');
     
-    if (!userEmail) {
+    if (!gmailToken) {
       return NextResponse.json({
         success: false,
-        error: 'Authentication required'
+        error: 'Gmail token required'
+      }, { status: 401, headers: corsHeaders });
+    }
+
+    // Validate token and get user
+    const { email: userEmail, isValid } = await validateGmailTokenAndGetUser(gmailToken);
+    
+    if (!isValid || !userEmail) {
+      return NextResponse.json({
+        success: false,
+        error: 'Invalid Gmail token'
       }, { status: 401, headers: corsHeaders });
     }
 
@@ -79,7 +89,7 @@ export async function GET(request: NextRequest) {
     // Get category counts from email_cache_simple table (privacy-first)
     const categoryCounts = await getCategoryCounts(user.id);
 
-    // NEW: Get reply analysis stats
+    // Get reply analysis stats
     const replyStats = await getReplyCounts(user.id);
 
     // Get total organized emails count
@@ -133,7 +143,7 @@ export async function GET(request: NextRequest) {
           Archive: 0,
           Trash: 0
         },
-        // NEW: Include reply stats for frontend
+        // Include reply stats for frontend
         replyStats: {
           totalReplies: replyStats.totalReplies,
           highUrgency: replyStats.highUrgency,
@@ -143,7 +153,7 @@ export async function GET(request: NextRequest) {
         recentEmails: recentOrganizedEmails,
         totalEmails: totalOrganizedEmails,
         // Privacy note
-        privacyNote: "Only organization metadata stored - no email content + reply analysis"
+        privacyNote: "Chrome extension authentication - no email content stored"
       }
     }, { headers: corsHeaders });
 
@@ -160,13 +170,24 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const { userEmail } = await request.json();
-
-    if (!userEmail) {
+    // Get Gmail token from Chrome extension
+    const gmailToken = request.headers.get('x-gmail-token');
+    
+    if (!gmailToken) {
       return NextResponse.json({
         success: false,
-        error: 'User email is required'
+        error: 'Gmail token required'
       }, { status: 400, headers: corsHeaders });
+    }
+
+    // Validate token and get user
+    const { email: userEmail, isValid } = await validateGmailTokenAndGetUser(gmailToken);
+    
+    if (!isValid || !userEmail) {
+      return NextResponse.json({
+        success: false,
+        error: 'Invalid Gmail token'
+      }, { status: 401, headers: corsHeaders });
     }
 
     console.log(`📊 Fetching user stats for: ${userEmail}`);
