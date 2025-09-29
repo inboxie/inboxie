@@ -56,7 +56,7 @@ async function getChromeGmailToken() {
     chrome.identity.getAuthToken({
       interactive: true,
       scopes: [
-        'https://www.googleapis.com/auth/gmail.readonly',  // ESSENTIAL - needed to read emails
+        'https://www.googleapis.com/auth/gmail.readonly',
         'https://www.googleapis.com/auth/gmail.modify',
         'https://www.googleapis.com/auth/gmail.labels',
         'https://www.googleapis.com/auth/userinfo.email',
@@ -84,8 +84,11 @@ async function authenticateWithBackend(gmailToken, apiBaseUrl) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Gmail-Token': gmailToken
-    }
+    },
+    body: JSON.stringify({
+      googleToken: gmailToken,
+      extensionId: chrome.runtime.id
+    })
   });
 
   if (!response.ok) {
