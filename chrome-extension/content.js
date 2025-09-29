@@ -1,7 +1,7 @@
 console.log('Inboxie content script loaded!');
 
 // Configuration
-const API_BASE_URL = 'https://inboxie.ai';;
+const API_BASE_URL = 'https://www.inboxie.ai';;
 const auth = new ExtensionAuth(API_BASE_URL);
 
 // State management
