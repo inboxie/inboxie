@@ -12,40 +12,36 @@ const supabase = createClient(
 const corsHeaders = {
   'Access-Control-Allow-Origin': 'https://mail.google.com',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, X-Gmail-Token', // Updated for Gmail token
+  'Access-Control-Allow-Headers': 'Content-Type, X-Gmail-Token',
   'Access-Control-Allow-Credentials': 'true'
 };
 
 /**
- * Validate Gmail token and get user info
+ * Validate Gmail token and get user info - Consistent with process-emails-fast
  */
-async function validateGmailTokenAndGetUser(token: string): Promise<{ email: string; isValid: boolean }> {
+async function validateGmailTokenAndGetUser(gmailToken: string): Promise<{ email: string; accessToken: string } | null> {
   try {
-    // Validate token with Google
-    const tokenResponse = await fetch(`https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=${token}`);
-    if (!tokenResponse.ok) {
-      return { email: '', isValid: false };
-    }
-
-    // Get user profile
-    const profileResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+    // Validate token with Google's userinfo endpoint
+    const response = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
       headers: {
-        'Authorization': `Bearer ${token}`
+        'Authorization': `Bearer ${gmailToken}`
       }
     });
 
-    if (!profileResponse.ok) {
-      return { email: '', isValid: false };
+    if (!response.ok) {
+      console.error('Gmail token validation failed:', response.status);
+      return null;
     }
 
-    const profile = await profileResponse.json();
+    const userInfo = await response.json();
+    
     return {
-      email: profile.email,
-      isValid: true
+      email: userInfo.email,
+      accessToken: gmailToken
     };
   } catch (error) {
-    console.error('Token validation failed:', error);
-    return { email: '', isValid: false };
+    console.error('Error validating Gmail token:', error);
+    return null;
   }
 }
 
@@ -58,8 +54,8 @@ export async function OPTIONS(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    // Get Gmail token from Chrome extension
-    const gmailToken = request.headers.get('x-gmail-token');
+    // Get Gmail token from Chrome extension (consistent header name)
+    const gmailToken = request.headers.get('X-Gmail-Token');
     
     if (!gmailToken) {
       return NextResponse.json({
@@ -68,15 +64,16 @@ export async function GET(request: NextRequest) {
       }, { status: 401, headers: corsHeaders });
     }
 
-    // Validate token and get user
-    const { email: userEmail, isValid } = await validateGmailTokenAndGetUser(gmailToken);
-    
-    if (!isValid || !userEmail) {
+    // Validate token and get user (consistent with process-emails-fast)
+    const tokenValidation = await validateGmailTokenAndGetUser(gmailToken);
+    if (!tokenValidation) {
       return NextResponse.json({
         success: false,
         error: 'Invalid Gmail token'
       }, { status: 401, headers: corsHeaders });
     }
+
+    const { email: userEmail } = tokenValidation;
 
     console.log('📊 Getting user stats for:', userEmail);
 
@@ -170,8 +167,8 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    // Get Gmail token from Chrome extension
-    const gmailToken = request.headers.get('x-gmail-token');
+    // Get Gmail token from Chrome extension (consistent header name)
+    const gmailToken = request.headers.get('X-Gmail-Token');
     
     if (!gmailToken) {
       return NextResponse.json({
@@ -180,15 +177,16 @@ export async function POST(request: NextRequest) {
       }, { status: 400, headers: corsHeaders });
     }
 
-    // Validate token and get user
-    const { email: userEmail, isValid } = await validateGmailTokenAndGetUser(gmailToken);
-    
-    if (!isValid || !userEmail) {
+    // Validate token and get user (consistent with process-emails-fast)
+    const tokenValidation = await validateGmailTokenAndGetUser(gmailToken);
+    if (!tokenValidation) {
       return NextResponse.json({
         success: false,
         error: 'Invalid Gmail token'
       }, { status: 401, headers: corsHeaders });
     }
+
+    const { email: userEmail } = tokenValidation;
 
     console.log(`📊 Fetching user stats for: ${userEmail}`);
     

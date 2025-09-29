@@ -1,9 +1,7 @@
 // src/app/api/process-emails-fast/route.ts - Optimized with Parallel Processing + Gmail Labeling + Reply Analysis + Smart Inbox
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '../auth/[...nextauth]/route';
 import { fetchLatestEmails, createGmailLabel, applyLabelToEmail, getGmailLabels } from '@/lib/gmail';
-import { processEmailsInMemory, analyzeEmailForReply } from '@/lib/openai';  // ADDED analyzeEmailForReply
+import { processEmailsInMemory, analyzeEmailForReply } from '@/lib/openai';
 import { 
   getOrCreateUser, 
   checkUserLimits,
@@ -11,9 +9,6 @@ import {
   updateUserEmailCount,
   saveEmailOrganization 
 } from '@/lib/supabase';
-import jwt from 'jsonwebtoken';
-
-const JWT_SECRET = process.env.NEXTAUTH_SECRET || 'your-fallback-secret';
 
 // Performance configuration
 const PERFORMANCE_CONFIG = {
@@ -25,43 +20,31 @@ const PERFORMANCE_CONFIG = {
   LABEL_BATCH_SIZE: 10            // Apply 10 labels per batch
 };
 
-// Helper function to get user email from either NextAuth session OR extension JWT
-async function getUserEmail(request: NextRequest): Promise<string | null> {
-  const session = await getServerSession(authOptions);
-  if (session?.user?.email) {
-    return session.user.email;
-  }
-
-  const authHeader = request.headers.get('authorization');
-  if (authHeader?.startsWith('Bearer ')) {
-    const token = authHeader.substring(7);
-    
-    try {
-      const decoded = jwt.verify(token, JWT_SECRET) as any;
-      if (decoded.email && decoded.type === 'extension') {
-        return decoded.email;
+// Helper function to validate Gmail token and get user email
+async function validateGmailTokenAndGetUser(gmailToken: string): Promise<{ email: string; accessToken: string } | null> {
+  try {
+    // Validate token with Google's userinfo endpoint
+    const response = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: {
+        'Authorization': `Bearer ${gmailToken}`
       }
-    } catch (error) {
-      console.error('Invalid extension JWT:', error);
+    });
+
+    if (!response.ok) {
+      console.error('Gmail token validation failed:', response.status);
+      return null;
     }
+
+    const userInfo = await response.json();
+    
+    return {
+      email: userInfo.email,
+      accessToken: gmailToken
+    };
+  } catch (error) {
+    console.error('Error validating Gmail token:', error);
+    return null;
   }
-
-  return null;
-}
-
-// Helper function to get access token for Gmail API
-async function getGmailAccessToken(request: NextRequest): Promise<string | null> {
-  const session = await getServerSession(authOptions);
-  if (session?.accessToken) {
-    return session.accessToken as string;
-  }
-
-  const googleToken = request.headers.get('x-google-token') || request.headers.get('X-Google-Token');
-  if (googleToken) {
-    return googleToken;
-  }
-
-  return null;
 }
 
 // Parallel Gmail fetching with rate limit awareness
@@ -185,7 +168,7 @@ async function processEmailsParallel(emails: any[]): Promise<any[]> {
   return results;
 }
 
-// NEW: Apply Gmail labels in parallel + Smart Inbox
+// Apply Gmail labels in parallel + Smart Inbox
 async function applyGmailLabelsParallel(
   accessToken: string, 
   processedMetadata: any[]
@@ -323,7 +306,7 @@ async function applyGmailLabelsParallel(
   }
 }
 
-// UPDATED: Parallel database saves with reply data
+// Parallel database saves with reply data
 async function saveMetadataParallel(
   processedMetadata: any[], 
   userId: string
@@ -385,22 +368,25 @@ export async function POST(request: NextRequest) {
   try {
     console.log('⚡ OPTIMIZED PROCESSING: Starting high-performance email processing with Gmail labeling + reply analysis + Smart Inbox...');
 
-    // Authentication
-    const userEmail = await getUserEmail(request);
-    if (!userEmail) {
+    // Get Gmail token from headers
+    const gmailToken = request.headers.get('X-Gmail-Token');
+    if (!gmailToken) {
       return NextResponse.json({
         success: false,
-        error: 'Authentication required'
+        error: 'Gmail token required'
       }, { status: 401 });
     }
 
-    const accessToken = await getGmailAccessToken(request);
-    if (!accessToken) {
+    // Validate Gmail token and get user info
+    const tokenValidation = await validateGmailTokenAndGetUser(gmailToken);
+    if (!tokenValidation) {
       return NextResponse.json({
         success: false,
-        error: 'Gmail access token required'
+        error: 'Invalid Gmail token'
       }, { status: 401 });
     }
+
+    const { email: userEmail, accessToken } = tokenValidation;
 
     const body = await request.json();
     const { emailLimit = 50 } = body;
@@ -465,7 +451,7 @@ export async function POST(request: NextRequest) {
     // Step 1: Get categories (existing)
     const processedMetadata = await processEmailsParallel(emailsForAI);
     
-    // Step 2: NEW - Add reply analysis in parallel
+    // Step 2: Add reply analysis in parallel
     console.log('🔍 ANALYZING REPLIES: Starting parallel reply analysis...');
     const replyAnalysisPromises = processedMetadata.map(async (metadata, index) => {
       try {

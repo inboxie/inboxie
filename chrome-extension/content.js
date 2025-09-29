@@ -12,7 +12,6 @@ let dashboardData = {
   planType: 'free',
   isProcessing: false,
   isAuthenticated: false,
-  categories: {},
   replyStats: { totalReplies: 0, highUrgency: 0, mediumUrgency: 0, lowUrgency: 0 }
 };
 
@@ -39,7 +38,6 @@ async function fetchDashboardData() {
           planType: stats.user?.planType || 'free',
           isProcessing: false,
           isAuthenticated: true,
-          categories: stats.folderCounts || {},
           replyStats: stats.replyStats || { totalReplies: 0, highUrgency: 0, mediumUrgency: 0, lowUrgency: 0 }
         };
         updateDashboardUI();
@@ -57,8 +55,7 @@ async function fetchDashboardData() {
 // Update UI with data
 function updateDashboardUI() {
   const authCard = document.querySelector('.auth-card');
-  const logoutCard = document.querySelector('.logout-card');
-  const dataCards = document.querySelectorAll('.inboxie-card:not(.auth-card):not(.logout-card)');
+  const dataCards = document.querySelectorAll('.inboxie-card:not(.auth-card)');
   
   console.log('Auth status:', dashboardData.isAuthenticated);
   
@@ -66,11 +63,8 @@ function updateDashboardUI() {
     // NOT AUTHENTICATED: Show only login card
     if (authCard) {
       authCard.style.display = 'flex';
+      authCard.querySelector('.card-value').textContent = 'Click to Login';
       console.log('Showing login card');
-    }
-    if (logoutCard) {
-      logoutCard.style.display = 'none';
-      console.log('Hiding logout card');
     }
     dataCards.forEach(card => {
       card.style.display = 'none';
@@ -79,15 +73,17 @@ function updateDashboardUI() {
     return; // IMPORTANT: Exit early
   }
   
-  // AUTHENTICATED: Show data cards and logout, hide login
+  // AUTHENTICATED: Show data cards, hide login (convert to logout)
   if (authCard) {
-    authCard.style.display = 'none';
-    console.log('Hiding login card');
+    authCard.style.display = 'flex';
+    authCard.querySelector('h4').textContent = 'Sign Out';
+    authCard.querySelector('.card-value').textContent = 'Click to Logout';
+    authCard.querySelector('.card-subtitle').textContent = 'Clear authentication';
+    authCard.querySelector('.card-icon').textContent = '🚪';
+    authCard.setAttribute('data-action', 'logout');
+    console.log('Converted to logout card');
   }
-  if (logoutCard) {
-    logoutCard.style.display = 'flex';
-    console.log('Showing logout card');
-  }
+  
   dataCards.forEach(card => {
     card.style.display = 'flex';
     console.log('Showing data card');
@@ -127,7 +123,6 @@ function updateDashboardUI() {
   }
 
   updateReplyAnalysis();
-  updateCategoryBreakdown();
 }
 
 // Update reply analysis
@@ -152,45 +147,7 @@ function updateReplyAnalysis() {
   }
 }
 
-// Update category breakdown
-function updateCategoryBreakdown() {
-  const categoryContainer = document.querySelector('.category-breakdown .category-list');
-  if (!categoryContainer) return;
-
-  const categories = dashboardData.categories;
-  const totalEmails = Object.values(categories).reduce((sum, count) => sum + count, 0);
-
-  if (totalEmails === 0) {
-    categoryContainer.innerHTML = '<div class="no-categories">No emails organized yet</div>';
-    return;
-  }
-
-  const sortedCategories = Object.entries(categories)
-    .filter(([_, count]) => count > 0)
-    .sort(([, a], [, b]) => b - a)
-    .slice(0, 6);
-
-  const categoryIcons = {
-    'Work': '💼', 'Personal': '👤', 'Newsletter': '📰',
-    'Shopping': '🛒', 'Support': '🎧', 'Other': '📂'
-  };
-
-  categoryContainer.innerHTML = sortedCategories
-    .map(([category, count]) => {
-      const percentage = Math.round((count / totalEmails) * 100);
-      const icon = categoryIcons[category] || '📁';
-      return `
-        <div class="category-item">
-          <span class="category-icon">${icon}</span>
-          <span class="category-name">${category}</span>
-          <span class="category-count">${count}</span>
-          <span class="category-percentage">(${percentage}%)</span>
-        </div>
-      `;
-    }).join('');
-}
-
-// Create dashboard
+// Create simplified dashboard with only 4 components
 function injectDashboard() {
   if (document.getElementById('inboxie-dashboard')) return;
 
@@ -198,14 +155,14 @@ function injectDashboard() {
   dashboard.id = 'inboxie-dashboard';
   dashboard.innerHTML = `
     <div class="inboxie-header">
-      <h3>📧 Inboxie AI Organizer</h3>
+      <h3>📧 inboxie</h3>
       <div class="header-controls">
-        <button id="position-btn" title="Position">📍</button>
-        <button id="compact-btn" title="Compact">⬅️</button>
         <button id="toggle-btn" title="Minimize">−</button>
       </div>
     </div>
+    </div>
     <div class="inboxie-cards">
+      <!-- 1. Emails Organized -->
       <div class="inboxie-card emails-organized">
         <div class="card-icon">📊</div>
         <div class="card-content">
@@ -215,6 +172,7 @@ function injectDashboard() {
         </div>
       </div>
       
+      <!-- 2. AI Organize -->
       <div class="inboxie-card import-status" data-action="import">
         <div class="card-icon">🤖</div>
         <div class="card-content">
@@ -224,7 +182,8 @@ function injectDashboard() {
         </div>
       </div>
 
-      <div class="inboxie-card reply-analysis">
+      <!-- 3. Pending Replies -->
+      <div class="inboxie-card reply-analysis" data-action="smart-inbox">
         <div class="card-icon">💬</div>
         <div class="card-content">
           <h4>Pending Replies</h4>
@@ -234,16 +193,7 @@ function injectDashboard() {
         </div>
       </div>
 
-      <div class="inboxie-card category-breakdown">
-        <div class="card-icon">🏷️</div>
-        <div class="card-content">
-          <h4>Email Categories</h4>
-          <div class="category-list">
-            <div class="no-categories">No emails organized yet</div>
-          </div>
-        </div>
-      </div>
-
+      <!-- 4. Sign In/Sign Out (Dynamic) -->
       <div class="inboxie-card auth-card" data-action="authenticate" style="display: none;">
         <div class="card-icon">🔐</div>
         <div class="card-content">
@@ -252,24 +202,12 @@ function injectDashboard() {
           <div class="card-subtitle">Connect to organize your emails</div>
         </div>
       </div>
-
-      <div class="inboxie-card logout-card" data-action="logout" style="display: none;">
-        <div class="card-icon">🚪</div>
-        <div class="card-content">
-          <h4>Sign Out</h4>
-          <div class="card-value">Click to Logout</div>
-          <div class="card-subtitle">Clear authentication</div>
-        </div>
-      </div>
     </div>
-    <div class="resize-handle"></div>
   `;
 
   document.body.appendChild(dashboard);
   loadDashboardState();
   setupControls();
-  makeDraggable();
-  makeResizable();
   
   // Card clicks
   setTimeout(() => {
@@ -283,39 +221,7 @@ function injectDashboard() {
 
 // Setup control buttons
 function setupControls() {
-  // Position toggle
-  document.getElementById('position-btn')?.addEventListener('click', () => {
-    const dashboard = document.getElementById('inboxie-dashboard');
-    if (dashboard.classList.contains('side-left')) {
-      dashboard.classList.remove('side-left');
-      dashboard.classList.add('side-right');
-    } else if (dashboard.classList.contains('side-right')) {
-      dashboard.classList.remove('side-right');
-      resetToCorner();
-    } else {
-      dashboard.classList.add('side-left');
-      resetToCorner();
-    }
-    saveDashboardState();
-  });
-
-  // Compact toggle
-  document.getElementById('compact-btn')?.addEventListener('click', (e) => {
-    const dashboard = document.getElementById('inboxie-dashboard');
-    const btn = e.target;
-    if (dashboard.classList.contains('compact')) {
-      dashboard.classList.remove('compact');
-      btn.textContent = '⬅️';
-      btn.title = 'Compact';
-    } else {
-      dashboard.classList.add('compact');
-      btn.textContent = '➡️';
-      btn.title = 'Expand';
-    }
-    saveDashboardState();
-  });
-
-  // Minimize toggle
+  // Minimize toggle only
   document.getElementById('toggle-btn')?.addEventListener('click', (e) => {
     const dashboard = document.getElementById('inboxie-dashboard');
     const btn = e.target;
@@ -329,12 +235,11 @@ function setupControls() {
     saveDashboardState();
   });
 
-  // Make entire minimized dashboard clickable to expand
+  // Click header to expand when minimized
   document.querySelector('.inboxie-header')?.addEventListener('click', (e) => {
     const dashboard = document.getElementById('inboxie-dashboard');
     const btn = document.getElementById('toggle-btn');
     
-    // Only expand if minimized and not clicking other buttons
     if (dashboard.classList.contains('minimized') && !e.target.closest('button')) {
       dashboard.classList.remove('minimized');
       btn.textContent = '−';
@@ -344,12 +249,7 @@ function setupControls() {
 }
 
 function resetToCorner() {
-  const dashboard = document.getElementById('inboxie-dashboard');
-  dashboard.style.removeProperty('left');
-  dashboard.style.removeProperty('top');
-  dashboard.style.removeProperty('transform');
-  dashboard.style.right = '20px';
-  dashboard.style.bottom = '20px';
+  // Not needed anymore - dashboard stays fixed
 }
 
 // Make draggable
@@ -460,21 +360,7 @@ function saveDashboardState() {
   if (!dashboard) return;
 
   const state = {
-    minimized: dashboard.classList.contains('minimized'),
-    compact: dashboard.classList.contains('compact'),
-    sideLeft: dashboard.classList.contains('side-left'),
-    sideRight: dashboard.classList.contains('side-right'),
-    position: {
-      left: dashboard.style.left,
-      top: dashboard.style.top,
-      right: dashboard.style.right,
-      bottom: dashboard.style.bottom
-    },
-    size: {
-      width: dashboard.style.width,
-      height: dashboard.style.height,
-      maxHeight: dashboard.style.maxHeight
-    }
+    minimized: dashboard.classList.contains('minimized')
   };
 
   localStorage.setItem('inboxie-dashboard-state', JSON.stringify(state));
@@ -491,34 +377,6 @@ function loadDashboardState() {
     if (state.minimized) {
       dashboard.classList.add('minimized');
       document.getElementById('toggle-btn').textContent = '+';
-    }
-
-    if (state.compact) {
-      dashboard.classList.add('compact');
-      const btn = document.getElementById('compact-btn');
-      btn.textContent = '➡️';
-      btn.title = 'Expand';
-    }
-
-    if (state.sideLeft) {
-      dashboard.classList.add('side-left');
-    } else if (state.sideRight) {
-      dashboard.classList.add('side-right');
-    }
-
-    if (state.position) {
-      const pos = state.position;
-      if (pos.left) dashboard.style.left = pos.left;
-      if (pos.top) dashboard.style.top = pos.top;
-      if (pos.right) dashboard.style.right = pos.right;
-      if (pos.bottom) dashboard.style.bottom = pos.bottom;
-    }
-
-    if (state.size) {
-      const size = state.size;
-      if (size.width) dashboard.style.width = size.width;
-      if (size.height) dashboard.style.height = size.height;
-      if (size.maxHeight) dashboard.style.maxHeight = size.maxHeight;
     }
   } catch (error) {
     console.log('Failed to load state:', error);
@@ -542,6 +400,14 @@ async function handleCardClick(action) {
     case 'import':
       if (dashboardData.importRemaining > 0 || !dashboardData.isAuthenticated) {
         startImport();
+      }
+      break;
+      
+    case 'smart-inbox':
+      // Navigate to Smart Inbox label in Gmail
+      if (dashboardData.replyStats.totalReplies > 0) {
+        const smartInboxUrl = `${window.location.origin}${window.location.pathname}#label/%E2%98%98%EF%B8%8F%20Smart%20Inbox`;
+        window.location.href = smartInboxUrl;
       }
       break;
   }

@@ -3,7 +3,6 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
-import { SessionProvider } from './providers/SessionProvider';
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -16,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Inboxie - AI Email Assistant",
-  description: "Your AI-powered email productivity tool",
+  title: "inboxie - AI Email Organizer for Gmail",
+  description: "Chrome extension that auto-organizes your Gmail with AI. Smart Inbox shows what needs replies.",
 };
 
 export default function RootLayout({
@@ -44,9 +43,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <SessionProvider>
-          {children}
-        </SessionProvider>
+        {children}
       </body>
     </html>
   );

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Mail, Zap, Shield, Clock, ArrowRight, CheckCircle, Star, Users, Folder, Filter } from 'lucide-react';
+import { Mail, Zap, Shield, Clock, ArrowRight, CheckCircle, Star, Users, Folder, Filter, Chrome } from 'lucide-react';
 
 export default function LandingPage() {
   const [showWaitlist, setShowWaitlist] = useState(false);
@@ -16,7 +16,6 @@ export default function LandingPage() {
     e.preventDefault();
     if (!waitlistEmail || !selectedProblem) return;
 
-    // Track waitlist signup for analytics
     if (typeof gtag !== 'undefined') {
       gtag('event', 'waitlist_signup', {
         event_category: 'conversion',
@@ -53,7 +52,6 @@ export default function LandingPage() {
     "Spend too much time organizing/sorting",
     "Miss important emails in the noise",
     "Overwhelmed by newsletters and promotions",
-    "Take forever to write replies",
     "Forget to respond to important emails",
     "No system for tracking what needs responses"
   ];
@@ -65,10 +63,10 @@ export default function LandingPage() {
           <CheckCircle size={64} className="success-icon" />
           <h1 className="success-title">You're on the list!</h1>
           <p className="success-text">
-            We'll notify you when inboxie is ready to transform your email experience.
+            We'll notify you as soon as inboxie launches on the Chrome Web Store.
           </p>
           <p className="success-subtext">
-            Thank you for helping us understand your biggest Gmail challenges.
+            Thank you for your interest in transforming your Gmail experience.
           </p>
         </div>
       </div>
@@ -91,7 +89,7 @@ export default function LandingPage() {
               onClick={() => setShowWaitlist(true)}
               className="nav-dashboard-btn"
             >
-              Get Early Access
+              Get Notified
             </button>
           </div>
         </div>
@@ -102,24 +100,29 @@ export default function LandingPage() {
         <div className="hero-content">
           {/* Header */}
           <div className="hero-header">
+            <div style={{display: 'flex', alignItems: 'center', gap: '12px', justifyContent: 'center', marginBottom: '1rem'}}>
+              <Chrome size={32} style={{color: '#ffffff'}} />
+              <span style={{fontSize: '1rem', fontWeight: 600, color: '#ffffff'}}>Chrome Extension</span>
+            </div>
+            
             <h1 className="hero-title">
-              You missed an important client email.<br />
-              <span className="hero-title-highlight">Again.</span>
+              Organize your emails in 10 seconds.<br />
+              <span className="hero-title-highlight">Use the Chrome extension.</span>
             </h1>
             
             <p className="hero-subtitle">
-              inboxie clears the chaos so you can focus on replies that <strong>really</strong> matter.
+              inboxie works inside Gmail to auto-label your emails and show you what needs replies. No new app to learn.
             </p>
 
             {/* Social Proof */}
             <div className="social-proof">
               <div className="social-proof-item">
-                <Users size={16} />
-                <span>Used by early testers across tech, consulting, and solopreneurs</span>
+                <Chrome size={16} />
+                <span>Works directly in Gmail</span>
               </div>
               <div className="social-proof-item">
-                <Star size={16} />
-                <span>Built by a consultant drowning in 700+ emails/week</span>
+                <Zap size={16} />
+                <span>Install in 10 seconds</span>
               </div>
               <div className="social-proof-item">
                 <Shield size={16} />
@@ -131,7 +134,7 @@ export default function LandingPage() {
           {/* Before/After Demo with captions */}
           <div className="demo-grid">
             <div className="demo-card before">
-              <h3 className="demo-title before-title">Inbox before inboxie</h3>
+              <h3 className="demo-title before-title">Gmail before inboxie</h3>
               <div className="demo-emails">
                 <div className="demo-email">Newsletter: Weekly digest...</div>
                 <div className="demo-email">Order confirmation...</div>
@@ -143,7 +146,7 @@ export default function LandingPage() {
             </div>
 
             <div className="demo-card after">
-              <h3 className="demo-title after-title">Inbox after inboxie</h3>
+              <h3 className="demo-title after-title">Gmail after inboxie</h3>
               <div className="demo-emails">
                 <div className="demo-email organized work">
                   <Folder size={14} className="demo-folder-icon" />Work: Client inquiry...
@@ -154,7 +157,7 @@ export default function LandingPage() {
                 <div className="demo-email organized shopping">
                   <Folder size={14} className="demo-folder-icon" />Shopping: Order confirmation...
                 </div>
-                <div className="demo-smart-inbox">Smart Inbox: Only 2 emails need your attention today</div>
+                <div className="demo-smart-inbox">Smart Inbox: Only 2 emails need your attention</div>
               </div>
             </div>
           </div>
@@ -166,16 +169,16 @@ export default function LandingPage() {
                 onClick={() => setShowWaitlist(true)}
                 className="cta-primary"
               >
-                <Mail size={20} />
-                Get Early Access
+                <Chrome size={20} />
+                Get Notified at Launch
                 <ArrowRight size={16} />
               </button>
               
-              <p className="cta-microcopy">Takes 10 seconds. No spam, ever.</p>
+              <p className="cta-microcopy">Coming soon to Chrome Web Store</p>
             </div>
           ) : (
             <div className="waitlist-form-container">
-              <h3 className="waitlist-title">Early Access Form</h3>
+              <h3 className="waitlist-title">Get Launch Notification</h3>
               <form onSubmit={handleWaitlistSubmit} className="waitlist-form">
                 <input
                   type="email"
@@ -223,7 +226,7 @@ export default function LandingPage() {
                     disabled={!waitlistEmail || !selectedProblem || isSubmittingWaitlist}
                     className="waitlist-submit-btn"
                   >
-                    {isSubmittingWaitlist ? 'Joining...' : 'Join Waitlist'}
+                    {isSubmittingWaitlist ? 'Joining...' : 'Notify Me'}
                   </button>
                 </div>
               </form>
@@ -232,11 +235,11 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Updated Features Section */}
+      {/* Updated Features Section - Only What's Built */}
       <section className="features-section">
         <div className="features-content">
           <h2 className="features-title">
-            Save hours each week. Stay focused.
+            Three features. Zero setup. Works in Gmail.
           </h2>
 
           <div className="features-grid">
@@ -245,22 +248,22 @@ export default function LandingPage() {
                 <Filter size={32} className="feature-icon" />
               </div>
               <h3 className="feature-card-title">Smart Inbox</h3>
-              <p className="feature-card-description">Only see what needs your attention</p>
+              <p className="feature-card-description">See only what needs replies</p>
               <p style={{color: '#6b7280', marginBottom: '1.5rem', fontSize: '1rem'}}>
-                Your Smart Inbox highlights just the 1–3 emails that actually need a response. Everything else is ignored.
+                AI analyzes your emails and highlights the 1-5 that actually need your response. Everything else gets auto-labeled and filed away.
               </p>
               <ul className="feature-benefits">
                 <li className="feature-benefit">
                   <span className="benefit-dot"></span>
-                  Prioritize replies
+                  High/medium/low urgency detection
                 </li>
                 <li className="feature-benefit">
                   <span className="benefit-dot"></span>
-                  Skip the noise
+                  One-click to see action items
                 </li>
                 <li className="feature-benefit">
                   <span className="benefit-dot"></span>
-                  Focus on what matters
+                  Never miss important emails
                 </li>
               </ul>
             </div>
@@ -270,22 +273,22 @@ export default function LandingPage() {
                 <Zap size={32} className="feature-icon" />
               </div>
               <h3 className="feature-card-title">Auto-Labeling</h3>
-              <p className="feature-card-description">Let AI organize your Gmail</p>
+              <p className="feature-card-description">AI organizes as emails arrive</p>
               <p style={{color: '#6b7280', marginBottom: '1.5rem', fontSize: '1rem'}}>
-                inboxie auto-labels your emails by type: Work, Personal, Promos, Orders, Clients & no setup needed.
+                Every email gets automatically labeled: Work, Personal, Shopping, Newsletter, Support, or Other. Labels appear directly in Gmail.
               </p>
               <ul className="feature-benefits">
                 <li className="feature-benefit">
                   <span className="benefit-dot"></span>
-                  Built-in Gmail labels
+                  Works with Gmail labels
                 </li>
                 <li className="feature-benefit">
                   <span className="benefit-dot"></span>
-                  No switching tools
+                  Process 50 emails at once
                 </li>
                 <li className="feature-benefit">
                   <span className="benefit-dot"></span>
-                  Just open and go
+                  No manual sorting needed
                 </li>
               </ul>
             </div>
@@ -294,23 +297,23 @@ export default function LandingPage() {
               <div className="feature-icon-container blue">
                 <Clock size={32} className="feature-icon" />
               </div>
-              <h3 className="feature-card-title">Reply in Your Tone</h3>
-              <p className="feature-card-description">AI drafts replies in your voice</p>
+              <h3 className="feature-card-title">Dashboard Insights</h3>
+              <p className="feature-card-description">Track your email progress</p>
               <p style={{color: '#6b7280', marginBottom: '1.5rem', fontSize: '1rem'}}>
-                Trained on your own writing style, inboxie helps you reply 10x faster and sound like yourself.
+                Floating dashboard shows how many emails you've organized, how many are left, and what needs replies. All without leaving Gmail.
               </p>
               <ul className="feature-benefits">
                 <li className="feature-benefit">
                   <span className="benefit-dot"></span>
-                  Voice-matching replies
+                  Live email counters
                 </li>
                 <li className="feature-benefit">
                   <span className="benefit-dot"></span>
-                  Saves hours every week
+                  Reply tracking
                 </li>
                 <li className="feature-benefit">
                   <span className="benefit-dot"></span>
-                  No robotic AI-speak
+                  Minimizable & draggable
                 </li>
               </ul>
             </div>
@@ -318,35 +321,38 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Problem Section */}
+      {/* How It Works Section */}
       <section className="problem-section">
         <div className="problem-content">
           <h2 className="problem-title">
-            Tired of email taking over your life?
+            How inboxie works
           </h2>
           
           <div className="problem-grid">
             <div className="problem-card">
-              <h3 className="problem-card-title problem">The Problem</h3>
+              <h3 className="problem-card-title problem">Step 1: Install</h3>
               <ul className="problem-list">
-                <li>Your inbox has <strong>1,000+ unread emails</strong> and it's giving you anxiety</li>
-                <li><strong>Important messages are buried</strong> in newsletters and promos</li>
-                <li>You're wasting <strong>hours manually sorting</strong> what's junk vs urgent</li>
-                <li>You <strong>miss critical emails</strong> from clients, colleagues, or your boss</li>
-                <li>You have <strong>no system</strong> to track what actually needs a response</li>
+                <li>Install the Chrome extension in <strong>10 seconds</strong></li>
+                <li>Sign in with <strong>Google OAuth</strong> (no password needed)</li>
+                <li>Grant Gmail permissions to read and label emails</li>
               </ul>
             </div>
             
             <div className="problem-card">
-              <h3 className="problem-card-title solution">The Solution</h3>
+              <h3 className="problem-card-title solution">Step 2: Organize</h3>
               <ul className="problem-list">
-                <li><strong>AI organizes everything</strong> the moment it lands in your inbox</li>
-                <li><strong>Smart Inbox</strong> shows you just the emails that need action</li>
-                <li><strong>Color-coded Gmail labels</strong> help you spot what's what instantly</li>
-                <li>You'll <strong>never miss another important message</strong> again</li>
-                <li><strong>Reply 10x faster</strong> in your own tone with AI-powered drafts</li>
+                <li>Click <strong>"AI Organize"</strong> in the dashboard</li>
+                <li>inboxie processes <strong>50 emails at once</strong></li>
+                <li>AI categorizes and labels everything automatically</li>
+                <li>Smart Inbox identifies emails needing replies</li>
               </ul>
             </div>
+          </div>
+
+          <div style={{marginTop: '2rem', textAlign: 'center'}}>
+            <p style={{fontSize: '1.125rem', color: '#6b7280'}}>
+              <strong>Step 3: Stay organized.</strong> The dashboard lives in Gmail and updates in real-time as you process more emails.
+            </p>
           </div>
         </div>
       </section>
@@ -354,25 +360,25 @@ export default function LandingPage() {
       {/* Trust Section */}
       <section className="trust-section">
         <div className="trust-content">
-          <h2 className="trust-title">Works with your Gmail · No new app to learn · Designed for busy people</h2>
+          <h2 className="trust-title">Built to work inside Gmail. Privacy-first. No new interface.</h2>
           
           <div className="trust-grid">
             <div className="trust-item">
               <Shield size={48} className="trust-icon blue" />
               <h3 className="trust-item-title">Google OAuth</h3>
-              <p className="trust-item-text">Secure sign-in via Google's official OAuth — <strong>no passwords stored</strong>.</p>
+              <p className="trust-item-text">Secure sign-in via Google's official OAuth. <strong>No passwords stored.</strong> We only store email metadata (categories, dates), never content.</p>
             </div>
             
             <div className="trust-item">
               <Mail size={48} className="trust-icon green" />
-              <h3 className="trust-item-title">Gmail Integration</h3>
-              <p className="trust-item-text">Works directly inside Gmail. <strong>No new interface to learn.</strong></p>
+              <h3 className="trust-item-title">Works in Gmail</h3>
+              <p className="trust-item-text">Chrome extension adds a floating dashboard to Gmail. <strong>No new app to learn.</strong> All labels appear as native Gmail labels.</p>
             </div>
             
             <div className="trust-item">
-              <Clock size={48} className="trust-icon purple" />
-              <h3 className="trust-item-title">Built for Busy People</h3>
-              <p className="trust-item-text">No settings. No rules to manage. <strong>Works out of the box</strong> to save you time.</p>
+              <Chrome size={48} className="trust-icon purple" />
+              <h3 className="trust-item-title">Chrome Extension</h3>
+              <p className="trust-item-text">Install once, works forever. <strong>No browser switching.</strong> Dashboard stays with you as you navigate Gmail.</p>
             </div>
           </div>
         </div>
@@ -388,7 +394,7 @@ export default function LandingPage() {
             <span className="footer-logo-text">inboxie</span>
           </div>
           <p className="footer-text">
-            Transform your Gmail experience with AI-powered email organization
+            Chrome extension for AI-powered Gmail organization
           </p>
         </div>
       </footer>
