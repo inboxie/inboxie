@@ -12,8 +12,9 @@ export function middleware(request: NextRequest) {
         headers: {
           'Access-Control-Allow-Origin': 'https://mail.google.com',
           'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, X-Gmail-Token',
+          'Access-Control-Allow-Headers': 'Content-Type, X-Gmail-Token, Authorization', // Added Authorization
           'Access-Control-Allow-Credentials': 'true',
+          'Access-Control-Max-Age': '86400', // Cache preflight for 24 hours
         },
       });
     }
@@ -22,7 +23,7 @@ export function middleware(request: NextRequest) {
     const response = NextResponse.next();
     response.headers.set('Access-Control-Allow-Origin', 'https://mail.google.com');
     response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    response.headers.set('Access-Control-Allow-Headers', 'Content-Type, X-Gmail-Token');
+    response.headers.set('Access-Control-Allow-Headers', 'Content-Type, X-Gmail-Token, Authorization'); // Added Authorization
     response.headers.set('Access-Control-Allow-Credentials', 'true');
     
     return response;
