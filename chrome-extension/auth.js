@@ -2,15 +2,11 @@
 class ExtensionAuth {
   constructor(apiBaseUrl) {
     this.apiBaseUrl = apiBaseUrl;
-    this.userInfo = null; // Store user info locally
+    this.userInfo = null;
   }
 
-  /**
-   * Check if user is authenticated by validating with backend
-   */
   async isAuthenticated() {
     try {
-      // Use background script to validate authentication
       const result = await this.sendMessageToBackground('validateToken', {
         apiBaseUrl: this.apiBaseUrl
       });
@@ -27,14 +23,10 @@ class ExtensionAuth {
     }
   }
 
-  /**
-   * Authenticate user using background script
-   */
   async authenticate() {
     try {
       console.log('Starting Chrome OAuth authentication...');
       
-      // Use background script to handle Chrome OAuth
       const result = await this.sendMessageToBackground('authenticate', {
         apiBaseUrl: this.apiBaseUrl
       });
@@ -55,9 +47,6 @@ class ExtensionAuth {
     }
   }
 
-  /**
-   * Send message to background script
-   */
   async sendMessageToBackground(action, data) {
     return new Promise((resolve, reject) => {
       console.log(`Content: Sending message to background - Action: ${action}`, data);
@@ -78,9 +67,6 @@ class ExtensionAuth {
     });
   }
 
-  /**
-   * Get stored Gmail token
-   */
   async getStoredGmailToken() {
     return new Promise((resolve, reject) => {
       chrome.storage.local.get(['gmail_token'], (result) => {
@@ -93,12 +79,8 @@ class ExtensionAuth {
     });
   }
 
-  /**
-   * Make API calls to your backend with Gmail token
-   */
   async apiCall(endpoint, options = {}) {
     try {
-      // Get stored Gmail token
       const gmailToken = await this.getStoredGmailToken();
       
       if (!gmailToken) {
@@ -117,7 +99,6 @@ class ExtensionAuth {
       });
 
       if (response.status === 401) {
-        // Token expired - clear and require re-auth
         await this.clearAuth();
         throw new Error('Session expired - please log in again');
       }
@@ -129,19 +110,12 @@ class ExtensionAuth {
     }
   }
 
-  /**
-   * Get current user info
-   */
   getUserInfo() {
     return this.userInfo;
   }
 
-  /**
-   * Clear stored authentication
-   */
   async clearAuth() {
     return new Promise((resolve, reject) => {
-      // Clear token from Chrome storage
       chrome.storage.local.remove(['gmail_token', 'auth_timestamp'], () => {
         if (chrome.runtime.lastError) {
           reject(chrome.runtime.lastError);
@@ -154,11 +128,13 @@ class ExtensionAuth {
     });
   }
 
-  /**
-   * Sign out user
-   */
   async signOut() {
+    // Clear Chrome's OAuth cache
+    await this.sendMessageToBackground('clearAuthCache', {});
+    
+    // Clear local storage
     await this.clearAuth();
+    
     alert('Signed out successfully. Refresh Gmail to see changes.');
   }
 }
