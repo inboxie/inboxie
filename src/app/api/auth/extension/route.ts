@@ -1,12 +1,14 @@
 // src/app/api/auth/extension/route.ts - Chrome Extension Authentication
+export const runtime = 'nodejs';
+
 import { NextRequest, NextResponse } from 'next/server';
 import { getOrCreateUser } from '@/lib/supabase';
 
 // CORS headers for extension requests
 const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://mail.google.com',
+  'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, X-Gmail-Token',
+  'Access-Control-Allow-Headers': 'Content-Type',
   'Access-Control-Allow-Credentials': 'true'
 };
 
@@ -96,8 +98,9 @@ export async function POST(request: NextRequest) {
   try {
     console.log('📱 EXTENSION AUTH: Processing authentication request...');
 
-    // Get Gmail token from request
-    const gmailToken = request.headers.get('x-gmail-token');
+    // Get Gmail token from request BODY
+    const body = await request.json();
+    const gmailToken = body.googleToken;
     
     if (!gmailToken) {
       return NextResponse.json({
@@ -135,7 +138,7 @@ export async function POST(request: NextRequest) {
         planType: user.plan_type,
         emailsProcessed: user.emails_processed,
         createdAt: user.created_at,
-        isNewUser: user.created_at === user.updated_at // Simple check for new user
+        isNewUser: user.created_at === user.updated_at
       },
       authMethod: 'chrome-extension'
     }, { headers: corsHeaders });
@@ -156,7 +159,7 @@ export async function POST(request: NextRequest) {
  */
 export async function GET(request: NextRequest) {
   try {
-    // Get Gmail token from request
+    // Get Gmail token from request header for GET requests
     const gmailToken = request.headers.get('x-gmail-token');
     
     if (!gmailToken) {
