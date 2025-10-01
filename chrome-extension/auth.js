@@ -18,30 +18,24 @@ class ExtensionAuth {
       
       return false;
     } catch (error) {
-      console.log('Not authenticated:', error.message);
       return false;
     }
   }
 
   async authenticate() {
     try {
-      console.log('Starting Chrome OAuth authentication...');
-      
       const result = await this.sendMessageToBackground('authenticate', {
         apiBaseUrl: this.apiBaseUrl
       });
       
       if (result.success) {
         this.userInfo = result.userInfo;
-        console.log('Authentication successful! User:', result.userInfo.email);
-        console.log('Plan:', result.userInfo.planType, '| Emails processed:', result.userInfo.emailsProcessed);
         return true;
       } else {
         throw new Error(result.error || 'Authentication failed');
       }
 
     } catch (error) {
-      console.error('Chrome OAuth failed:', error);
       alert(`Authentication failed: ${error.message}`);
       return false;
     }
@@ -49,16 +43,10 @@ class ExtensionAuth {
 
   async sendMessageToBackground(action, data) {
     return new Promise((resolve, reject) => {
-      console.log(`Content: Sending message to background - Action: ${action}`, data);
-      
       chrome.runtime.sendMessage({ action, ...data }, (response) => {
-        console.log('Content: Received response from background:', response);
-        
         if (chrome.runtime.lastError) {
-          console.error('Content: Runtime error:', chrome.runtime.lastError);
           reject(chrome.runtime.lastError);
         } else if (!response) {
-          console.error('Content: No response from background script');
           reject(new Error('No response from background script'));
         } else {
           resolve(response);
@@ -105,7 +93,6 @@ class ExtensionAuth {
 
       return response;
     } catch (error) {
-      console.error('API call failed:', error);
       throw error;
     }
   }
@@ -120,7 +107,6 @@ class ExtensionAuth {
         if (chrome.runtime.lastError) {
           reject(chrome.runtime.lastError);
         } else {
-          console.log('Authentication cleared');
           this.userInfo = null;
           resolve();
         }
@@ -129,12 +115,8 @@ class ExtensionAuth {
   }
 
   async signOut() {
-    // Clear Chrome's OAuth cache
     await this.sendMessageToBackground('clearAuthCache', {});
-    
-    // Clear local storage
     await this.clearAuth();
-    
     alert('Signed out successfully. Refresh Gmail to see changes.');
   }
 }

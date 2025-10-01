@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
   "name": "inboxie - AI Email Assistant",
-  "version": "1.0",
+  "version": "1.0.0",
   "description": "AI-powered email organization and analytics for Gmail",
+  "homepage_url": "https://inboxie.ai/privacy",
   "permissions": [
     "storage",
     "activeTab",

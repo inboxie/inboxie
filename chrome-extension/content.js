@@ -1,7 +1,5 @@
-console.log('Inboxie content script loaded!');
-
 // Configuration
-const API_BASE_URL = 'https://www.inboxie.ai';;
+const API_BASE_URL = 'https://www.inboxie.ai';
 const auth = new ExtensionAuth(API_BASE_URL);
 
 // State management
@@ -17,7 +15,6 @@ let dashboardData = {
 
 // Wait for Gmail to load
 setTimeout(() => {
-  console.log('Injecting Inboxie dashboard...');
   injectDashboard();
   fetchDashboardData();
   setInterval(fetchDashboardData, 30000);
@@ -41,12 +38,10 @@ async function fetchDashboardData() {
           replyStats: stats.replyStats || { totalReplies: 0, highUrgency: 0, mediumUrgency: 0, lowUrgency: 0 }
         };
         updateDashboardUI();
-        console.log('Data loaded successfully!');
         return;
       }
     }
   } catch (error) {
-    console.log('Not authenticated:', error.message);
     dashboardData.isAuthenticated = false;
     updateDashboardUI();
   }
@@ -57,23 +52,17 @@ function updateDashboardUI() {
   const authCard = document.querySelector('.auth-card');
   const dataCards = document.querySelectorAll('.inboxie-card:not(.auth-card)');
   
-  console.log('Auth status:', dashboardData.isAuthenticated);
-  
   if (!dashboardData.isAuthenticated) {
-    // NOT AUTHENTICATED: Show only login card
     if (authCard) {
       authCard.style.display = 'flex';
       authCard.querySelector('.card-value').textContent = 'Click to Login';
-      console.log('Showing login card');
     }
     dataCards.forEach(card => {
       card.style.display = 'none';
-      console.log('Hiding data card');
     });
-    return; // IMPORTANT: Exit early
+    return;
   }
   
-  // AUTHENTICATED: Show data cards, hide login (convert to logout)
   if (authCard) {
     authCard.style.display = 'flex';
     authCard.querySelector('h4').textContent = 'Sign Out';
@@ -81,21 +70,17 @@ function updateDashboardUI() {
     authCard.querySelector('.card-subtitle').textContent = 'Clear authentication';
     authCard.querySelector('.card-icon').textContent = '🚪';
     authCard.setAttribute('data-action', 'logout');
-    console.log('Converted to logout card');
   }
   
   dataCards.forEach(card => {
     card.style.display = 'flex';
-    console.log('Showing data card');
   });
 
-  // Update emails organized
   const emailsValue = document.querySelector('.emails-organized .card-value');
   const emailsSubtitle = document.querySelector('.emails-organized .card-subtitle');
   if (emailsValue) emailsValue.textContent = `${dashboardData.emailsOrganized}/${dashboardData.emailsLimit}`;
   if (emailsSubtitle) emailsSubtitle.textContent = `${dashboardData.planType === 'free' ? 'Free' : 'Pro'} plan usage`;
 
-  // Update import status
   const importValue = document.querySelector('.import-status .card-value');
   const importSubtitle = document.querySelector('.import-status .card-subtitle');
   const importCard = document.querySelector('.import-status');
@@ -125,7 +110,6 @@ function updateDashboardUI() {
   updateReplyAnalysis();
 }
 
-// Update reply analysis
 function updateReplyAnalysis() {
   const replyValue = document.querySelector('.reply-analysis .card-value');
   const replyBreakdown = document.querySelector('.reply-breakdown');
@@ -147,7 +131,6 @@ function updateReplyAnalysis() {
   }
 }
 
-// Create simplified dashboard with only 4 components
 function injectDashboard() {
   if (document.getElementById('inboxie-dashboard')) return;
 
@@ -160,9 +143,7 @@ function injectDashboard() {
         <button id="toggle-btn" title="Minimize">−</button>
       </div>
     </div>
-    </div>
     <div class="inboxie-cards">
-      <!-- 1. Emails Organized -->
       <div class="inboxie-card emails-organized">
         <div class="card-icon">📊</div>
         <div class="card-content">
@@ -172,7 +153,6 @@ function injectDashboard() {
         </div>
       </div>
       
-      <!-- 2. AI Organize -->
       <div class="inboxie-card import-status" data-action="import">
         <div class="card-icon">🤖</div>
         <div class="card-content">
@@ -182,7 +162,6 @@ function injectDashboard() {
         </div>
       </div>
 
-      <!-- 3. Pending Replies -->
       <div class="inboxie-card reply-analysis" data-action="smart-inbox">
         <div class="card-icon">💬</div>
         <div class="card-content">
@@ -193,7 +172,6 @@ function injectDashboard() {
         </div>
       </div>
 
-      <!-- 4. Sign In/Sign Out (Dynamic) -->
       <div class="inboxie-card auth-card" data-action="authenticate" style="display: none;">
         <div class="card-icon">🔐</div>
         <div class="card-content">
@@ -209,7 +187,6 @@ function injectDashboard() {
   loadDashboardState();
   setupControls();
   
-  // Card clicks
   setTimeout(() => {
     document.querySelectorAll('.inboxie-card[data-action]').forEach(card => {
       card.addEventListener('click', function() {
@@ -219,9 +196,7 @@ function injectDashboard() {
   }, 100);
 }
 
-// Setup control buttons
 function setupControls() {
-  // Minimize toggle only
   document.getElementById('toggle-btn')?.addEventListener('click', (e) => {
     const dashboard = document.getElementById('inboxie-dashboard');
     const btn = e.target;
@@ -235,7 +210,6 @@ function setupControls() {
     saveDashboardState();
   });
 
-  // Click header to expand when minimized
   document.querySelector('.inboxie-header')?.addEventListener('click', (e) => {
     const dashboard = document.getElementById('inboxie-dashboard');
     const btn = document.getElementById('toggle-btn');
@@ -248,113 +222,6 @@ function setupControls() {
   });
 }
 
-function resetToCorner() {
-  // Not needed anymore - dashboard stays fixed
-}
-
-// Make draggable
-function makeDraggable() {
-  const dashboard = document.getElementById('inboxie-dashboard');
-  const header = document.querySelector('.inboxie-header');
-  if (!dashboard || !header) return;
-
-  let isDragging = false;
-  let startX, startY, offsetX, offsetY;
-
-  header.addEventListener('mousedown', (e) => {
-    if (e.target.closest('button')) return;
-    
-    isDragging = true;
-    dashboard.classList.add('dragging');
-    
-    const rect = dashboard.getBoundingClientRect();
-    startX = e.clientX;
-    startY = e.clientY;
-    offsetX = rect.left;
-    offsetY = rect.top;
-    
-    e.preventDefault();
-  });
-
-  document.addEventListener('mousemove', (e) => {
-    if (!isDragging) return;
-    
-    const deltaX = e.clientX - startX;
-    const deltaY = e.clientY - startY;
-    
-    const newX = Math.max(0, Math.min(offsetX + deltaX, window.innerWidth - dashboard.offsetWidth));
-    const newY = Math.max(0, Math.min(offsetY + deltaY, window.innerHeight - dashboard.offsetHeight));
-    
-    dashboard.style.left = newX + 'px';
-    dashboard.style.top = newY + 'px';
-    dashboard.style.removeProperty('right');
-    dashboard.style.removeProperty('bottom');
-    dashboard.style.removeProperty('transform');
-    dashboard.classList.remove('side-left', 'side-right');
-  });
-
-  document.addEventListener('mouseup', () => {
-    if (isDragging) {
-      isDragging = false;
-      dashboard.classList.remove('dragging');
-      saveDashboardState();
-    }
-  });
-}
-
-// Make resizable
-function makeResizable() {
-  const dashboard = document.getElementById('inboxie-dashboard');
-  const resizeHandle = document.querySelector('.resize-handle');
-  if (!dashboard || !resizeHandle) return;
-
-  let isResizing = false;
-  let startX, startY, startWidth, startHeight;
-
-  resizeHandle.addEventListener('mousedown', (e) => {
-    isResizing = true;
-    
-    const rect = dashboard.getBoundingClientRect();
-    startX = e.clientX;
-    startY = e.clientY;
-    startWidth = rect.width;
-    startHeight = rect.height;
-    
-    dashboard.style.userSelect = 'none';
-    document.body.style.cursor = 'nw-resize';
-    
-    e.preventDefault();
-    e.stopPropagation();
-  });
-
-  document.addEventListener('mousemove', (e) => {
-    if (!isResizing) return;
-    
-    const deltaX = e.clientX - startX;
-    const deltaY = e.clientY - startY;
-    
-    const newWidth = Math.max(280, Math.min(600, startWidth + deltaX));
-    const newHeight = Math.max(200, Math.min(800, startHeight + deltaY));
-    
-    dashboard.style.width = newWidth + 'px';
-    dashboard.style.height = newHeight + 'px';
-    dashboard.style.maxHeight = newHeight + 'px';
-    
-    // Remove preset classes when manually resizing
-    dashboard.classList.remove('compact', 'side-left', 'side-right');
-  });
-
-  document.addEventListener('mouseup', () => {
-    if (isResizing) {
-      isResizing = false;
-      dashboard.style.userSelect = '';
-      document.body.style.cursor = '';
-      saveDashboardState();
-    }
-  });
-}
-
-// Save/load state
 function saveDashboardState() {
   const dashboard = document.getElementById('inboxie-dashboard');
   if (!dashboard) return;
@@ -379,11 +246,10 @@ function loadDashboardState() {
       document.getElementById('toggle-btn').textContent = '+';
     }
   } catch (error) {
-    console.log('Failed to load state:', error);
+    // Silently fail - not critical
   }
 }
 
-// Handle card clicks
 async function handleCardClick(action) {
   switch (action) {
     case 'authenticate':
@@ -404,7 +270,6 @@ async function handleCardClick(action) {
       break;
       
     case 'smart-inbox':
-      // Navigate to Smart Inbox label in Gmail
       if (dashboardData.replyStats.totalReplies > 0) {
         const smartInboxUrl = `${window.location.origin}${window.location.pathname}#label/%E2%98%98%EF%B8%8F%20Smart%20Inbox`;
         window.location.href = smartInboxUrl;
@@ -413,7 +278,6 @@ async function handleCardClick(action) {
   }
 }
 
-// Start import
 async function startImport() {
   try {
     dashboardData.isProcessing = true;
@@ -431,7 +295,6 @@ async function startImport() {
         if (result.data.replies) {
           dashboardData.replyStats = result.data.replies;
         }
-        console.log(`✅ Processed ${result.data.processed} emails`);
         setTimeout(fetchDashboardData, 1000);
       } else {
         alert(`Processing failed: ${result.error}`);
@@ -448,7 +311,6 @@ async function startImport() {
   }
 }
 
-// Handle Gmail navigation
 let currentUrl = window.location.href;
 setInterval(() => {
   if (window.location.href !== currentUrl) {

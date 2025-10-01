@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Mail, Zap, Shield, Clock, ArrowRight, CheckCircle, Star, Users, Folder, Filter, Chrome } from 'lucide-react';
+import Link from 'next/link';
 
 export default function LandingPage() {
   const [showWaitlist, setShowWaitlist] = useState(false);
@@ -85,6 +86,9 @@ export default function LandingPage() {
             <span className="nav-logo-text">inboxie</span>
           </div>
           <div className="nav-actions">
+            <Link href="/privacy" style={{marginRight: '1rem', color: '#6b7280', textDecoration: 'none', fontSize: '0.875rem'}}>
+              Privacy
+            </Link>
             <button
               onClick={() => setShowWaitlist(true)}
               className="nav-dashboard-btn"
@@ -396,6 +400,11 @@ export default function LandingPage() {
           <p className="footer-text">
             Chrome extension for AI-powered Gmail organization
           </p>
+          <div style={{marginTop: '1rem'}}>
+            <Link href="/privacy" style={{color: '#6b7280', textDecoration: 'none', fontSize: '0.875rem'}}>
+              Privacy Policy
+            </Link>
+          </div>
         </div>
       </footer>
     </div>

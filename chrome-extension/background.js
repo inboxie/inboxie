@@ -24,38 +24,30 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 async function handleAuthentication(apiBaseUrl) {
   try {
-    console.log('Background: Starting Chrome OAuth authentication...');
-    
     const gmailToken = await getChromeGmailToken();
     
     if (!gmailToken) {
       throw new Error('Failed to get Gmail token from Chrome');
     }
     
-    console.log('Background: Got Gmail token, validating with backend...');
-    
     const userInfo = await authenticateWithBackend(gmailToken, apiBaseUrl);
     
     await storeGmailToken(gmailToken);
     
-    console.log('Background: Authentication successful!', userInfo.email);
     return userInfo;
     
   } catch (error) {
-    console.error('Background: Authentication failed:', error);
+    console.error('Authentication failed:', error);
     throw error;
   }
 }
 
 async function getChromeGmailToken() {
   return new Promise((resolve, reject) => {
-    console.log('Background: Requesting Gmail permissions...');
-    
     // First, clear any cached token
     chrome.identity.getAuthToken({ interactive: false }, (cachedToken) => {
       if (cachedToken) {
         chrome.identity.removeCachedAuthToken({ token: cachedToken }, () => {
-          console.log('Background: Cleared cached token, requesting fresh one...');
           requestNewToken(resolve, reject);
         });
       } else {
@@ -77,10 +69,9 @@ function requestNewToken(resolve, reject) {
     ]
   }, (token) => {
     if (chrome.runtime.lastError) {
-      console.error('Background: Chrome identity error:', chrome.runtime.lastError);
+      console.error('Chrome identity error:', chrome.runtime.lastError);
       reject(chrome.runtime.lastError);
     } else if (token) {
-      console.log('Background: Gmail token received successfully');
       resolve(token);
     } else {
       reject(new Error('No Gmail token received'));
@@ -93,7 +84,6 @@ async function clearChromeAuthCache() {
     chrome.identity.getAuthToken({ interactive: false }, (token) => {
       if (token) {
         chrome.identity.removeCachedAuthToken({ token: token }, () => {
-          console.log('Background: Cleared Chrome auth cache');
           resolve();
         });
       } else {
@@ -154,7 +144,7 @@ async function validateTokenWithBackend(apiBaseUrl) {
       return { valid: false, userInfo: null };
     }
   } catch (error) {
-    console.error('Background: Token validation failed:', error);
+    console.error('Token validation failed:', error);
     return { valid: false, userInfo: null };
   }
 }
@@ -168,7 +158,6 @@ async function storeGmailToken(gmailToken) {
       if (chrome.runtime.lastError) {
         reject(chrome.runtime.lastError);
       } else {
-        console.log('Background: Gmail token stored');
         resolve();
       }
     });
