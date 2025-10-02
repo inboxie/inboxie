@@ -86,9 +86,6 @@ export default function LandingPage() {
             <span className="nav-logo-text">inboxie</span>
           </div>
           <div className="nav-actions">
-            <Link href="/privacy" style={{marginRight: '1rem', color: '#6b7280', textDecoration: 'none', fontSize: '0.875rem'}}>
-              Privacy
-            </Link>
             <button
               onClick={() => setShowWaitlist(true)}
               className="nav-dashboard-btn"
