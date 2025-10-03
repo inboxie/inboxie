@@ -15,7 +15,7 @@
     "https://inboxie.ai/*"
   ],
   "oauth2": {
-    "client_id": "133159620285-a1pmrljedhia4afuv0o639i1u22vobpp.apps.googleusercontent.com",
+    "client_id": "133159620285-c9sea48vo54p44rbvgcsl6sacrvghks6.apps.googleusercontent.com",
     "scopes": [
       "openid",
       "email", 
