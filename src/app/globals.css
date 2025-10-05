@@ -1276,6 +1276,10 @@ body {
     gap: 12px;
     padding: 16px;
   }
+  
+  .trust-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 480px) {
