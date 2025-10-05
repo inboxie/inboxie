@@ -132,6 +132,29 @@ export default function LandingPage() {
             </div>
           </div>
 
+          {/* Demo Video - NEW ADDITION */}
+          <div style={{textAlign: 'center', marginBottom: '4rem'}}>
+            <video 
+              autoPlay 
+              loop 
+              muted 
+              playsInline
+              style={{
+                maxWidth: '900px', 
+                width: '100%', 
+                borderRadius: '1.5rem',
+                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+                border: '1px solid rgba(255, 255, 255, 0.2)'
+              }}
+            >
+              <source src="/demo.mp4" type="video/mp4" />
+              Your browser does not support the video tag.
+            </video>
+            <p style={{marginTop: '1rem', fontSize: '0.875rem', color: 'rgba(255, 255, 255, 0.7)', fontStyle: 'italic'}}>
+              Watch inboxie organize 50 emails in seconds
+            </p>
+          </div>
+
           {/* Before/After Demo with captions */}
           <div className="demo-grid">
             <div className="demo-card before">
