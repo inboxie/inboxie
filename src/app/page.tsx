@@ -1,9 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { Mail, Zap, Shield, Clock, ArrowRight, CheckCircle, Star, Users, Folder, Filter, Chrome } from 'lucide-react';
-import Link from 'next/link';
+import { Mail, Zap, Shield, Clock, ArrowRight, CheckCircle, Folder, Filter, Chrome, ExternalLink } from 'lucide-react';
 
 export default function LandingPage() {
   const [showWaitlist, setShowWaitlist] = useState(false);
@@ -11,7 +9,8 @@ export default function LandingPage() {
   const [selectedProblem, setSelectedProblem] = useState('');
   const [isSubmittingWaitlist, setIsSubmittingWaitlist] = useState(false);
   const [waitlistSuccess, setWaitlistSuccess] = useState(false);
-  const router = useRouter();
+
+  const CHROME_STORE_URL = "https://chromewebstore.google.com/detail/inboxie-ai-email-assistan/ieocpkmconpngmncgdbhafnnhnamijdl";
 
   const handleWaitlistSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,13 +61,32 @@ export default function LandingPage() {
       <div className="landing-container">
         <div className="success-card">
           <CheckCircle size={64} className="success-icon" />
-          <h1 className="success-title">You're on the list!</h1>
+          <h1 className="success-title">Thanks for joining!</h1>
           <p className="success-text">
-            We'll notify you as soon as inboxie launches on the Chrome Web Store.
+            We'll keep you updated on new features and improvements to inboxie.
           </p>
           <p className="success-subtext">
-            Thank you for your interest in transforming your Gmail experience.
+            In the meantime, you can install the extension from the Chrome Web Store.
           </p>
+          <a 
+            href={CHROME_STORE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              marginTop: '1.5rem',
+              padding: '1rem 2rem',
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              color: 'white',
+              borderRadius: '1rem',
+              textDecoration: 'none',
+              fontWeight: 600
+            }}
+          >
+            Install Now <ExternalLink size={16} />
+          </a>
         </div>
       </div>
     );
@@ -86,12 +104,15 @@ export default function LandingPage() {
             <span className="nav-logo-text">inboxie</span>
           </div>
           <div className="nav-actions">
-            <button
-              onClick={() => setShowWaitlist(true)}
+            <a
+              href={CHROME_STORE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
               className="nav-dashboard-btn"
+              style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
             >
-              Get Notified
-            </button>
+              Install Extension <ExternalLink size={14} />
+            </a>
           </div>
         </div>
       </nav>
@@ -103,7 +124,7 @@ export default function LandingPage() {
           <div className="hero-header">
             <div style={{display: 'flex', alignItems: 'center', gap: '12px', justifyContent: 'center', marginBottom: '1rem'}}>
               <Chrome size={32} style={{color: '#ffffff'}} />
-              <span style={{fontSize: '1rem', fontWeight: 600, color: '#ffffff'}}>Chrome Extension</span>
+              <span style={{fontSize: '1rem', fontWeight: 600, color: '#ffffff'}}>Chrome Extension • Live on Chrome Web Store</span>
             </div>
             
             <h1 className="hero-title">
@@ -132,7 +153,7 @@ export default function LandingPage() {
             </div>
           </div>
 
-          {/* Demo Video - NEW ADDITION */}
+          {/* Demo Video */}
           <div style={{textAlign: 'center', marginBottom: '4rem'}}>
             <video 
               autoPlay 
@@ -155,7 +176,7 @@ export default function LandingPage() {
             </p>
           </div>
 
-          {/* Before/After Demo with captions */}
+          {/* Before/After Demo */}
           <div className="demo-grid">
             <div className="demo-card before">
               <h3 className="demo-title before-title">Gmail before inboxie</h3>
@@ -186,23 +207,46 @@ export default function LandingPage() {
             </div>
           </div>
 
-          {/* CTA Buttons */}
+          {/* CTA Buttons - UPDATED */}
           {!showWaitlist ? (
             <div className="cta-section">
-              <button
-                onClick={() => setShowWaitlist(true)}
+              <a
+                href={CHROME_STORE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
                 className="cta-primary"
+                style={{ textDecoration: 'none' }}
               >
                 <Chrome size={20} />
-                Get Notified at Launch
-                <ArrowRight size={16} />
-              </button>
+                Install from Chrome Web Store
+                <ExternalLink size={16} />
+              </a>
               
-              <p className="cta-microcopy">Coming soon to Chrome Web Store</p>
+              <p className="cta-microcopy">Free • Works in Gmail • No credit card required</p>
+              
+              <button
+                onClick={() => setShowWaitlist(true)}
+                style={{
+                  marginTop: '1rem',
+                  background: 'transparent',
+                  border: '2px solid rgba(255, 255, 255, 0.3)',
+                  color: 'white',
+                  padding: '0.75rem 1.5rem',
+                  borderRadius: '1rem',
+                  cursor: 'pointer',
+                  fontSize: '0.875rem',
+                  fontWeight: 600
+                }}
+              >
+                Join Email List for Updates
+              </button>
             </div>
           ) : (
             <div className="waitlist-form-container">
-              <h3 className="waitlist-title">Get Launch Notification</h3>
+              <h3 className="waitlist-title">Get Updates</h3>
+              <p style={{textAlign: 'center', color: '#6b7280', marginBottom: '1.5rem', fontSize: '0.875rem'}}>
+                Join our email list to hear about new features and improvements
+              </p>
               <form onSubmit={handleWaitlistSubmit} className="waitlist-form">
                 <input
                   type="email"
@@ -250,7 +294,7 @@ export default function LandingPage() {
                     disabled={!waitlistEmail || !selectedProblem || isSubmittingWaitlist}
                     className="waitlist-submit-btn"
                   >
-                    {isSubmittingWaitlist ? 'Joining...' : 'Notify Me'}
+                    {isSubmittingWaitlist ? 'Joining...' : 'Join List'}
                   </button>
                 </div>
               </form>
@@ -259,7 +303,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Updated Features Section - Only What's Built */}
+      {/* Features Section */}
       <section className="features-section">
         <div className="features-content">
           <h2 className="features-title">
@@ -420,10 +464,13 @@ export default function LandingPage() {
           <p className="footer-text">
             Chrome extension for AI-powered Gmail organization
           </p>
-          <div style={{marginTop: '1rem'}}>
-            <Link href="/privacy" style={{color: '#6b7280', textDecoration: 'none', fontSize: '0.875rem'}}>
+          <div style={{marginTop: '1rem', display: 'flex', gap: '1rem', justifyContent: 'center', fontSize: '0.875rem'}}>
+            <a href="/privacy" style={{color: '#6b7280', textDecoration: 'none'}}>
               Privacy Policy
-            </Link>
+            </a>
+            <a href={CHROME_STORE_URL} target="_blank" rel="noopener noreferrer" style={{color: '#6b7280', textDecoration: 'none'}}>
+              Chrome Web Store
+            </a>
           </div>
         </div>
       </footer>
